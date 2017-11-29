@@ -11,14 +11,14 @@ import requests
 # project
 from checks import AgentCheck
 
-EVENT_TYPE = SOURCE_TYPE_NAME = 'ecs'
+EVENT_TYPE = SOURCE_TYPE_NAME = 'fargate'
 API_ENDPOINT = 'http://169.254.170.2/v2'
 METADATA_ROUTE = '/metadata'
 STATS_ROUTE = '/stats'
 DEFAULT_TIMEOUT = 5
 CGROUP_NO_VALUE = 0x7ffffffffffff000
 
-class EcsCheck(AgentCheck):
+class FargateCheck(AgentCheck):
 
     def check(self, instance):
         timeout = float(instance.get('timeout', DEFAULT_TIMEOUT))
@@ -28,19 +28,19 @@ class EcsCheck(AgentCheck):
         try:
             request = requests.get(metadata_endpoint, timeout=timeout)
         except requests.exceptions.Timeout as e:
-            msg = 'ECS {} endpoint timed out after {} seconds'.format(metadata_endpoint, timeout)
-            self.service_check('ecs_check', AgentCheck.CRITICAL, message=msg)
+            msg = 'Fargate {} endpoint timed out after {} seconds'.format(metadata_endpoint, timeout)
+            self.service_check('fargate_check', AgentCheck.CRITICAL, message=msg)
             self.log.error(msg)
             return
         except Exception as e:
-            msg = 'Error fetching ECS {} endpoint'.format(metadata_endpoint)
-            self.service_check('ecs_check', AgentCheck.CRITICAL, message=msg)
+            msg = 'Error fetching Fargate {} endpoint'.format(metadata_endpoint)
+            self.service_check('fargate_check', AgentCheck.CRITICAL, message=msg)
             self.log.error(msg)
             return
 
         if request.status_code != 200:
-            msg = 'ECS {} endpoint responded with {} HTTP code'.format(metadata_endpoint, request.status_code)
-            self.service_check('ecs_check', AgentCheck.CRITICAL, message=msg)
+            msg = 'Fargate {} endpoint responded with {} HTTP code'.format(metadata_endpoint, request.status_code)
+            self.service_check('fargate_check', AgentCheck.CRITICAL, message=msg)
             self.log.warning(msg)
             return
 
@@ -48,8 +48,8 @@ class EcsCheck(AgentCheck):
         try:
             metadata = request.json()
         except:
-            msg = 'Cannot decode ECS {} endpoint response'.format(metadata_endpoint)
-            self.service_check('ecs_check', AgentCheck.WARNING, message=msg)
+            msg = 'Cannot decode Fargate {} endpoint response'.format(metadata_endpoint)
+            self.service_check('fargate_check', AgentCheck.WARNING, message=msg)
             self.log.warning(msg)
             return
 
@@ -77,26 +77,26 @@ class EcsCheck(AgentCheck):
                     container_tags[c_id].append(label + ':' + value)
 
             if container['Limits']['CPU'] > 0:
-                self.gauge('ecs.cpu.limit', container['Limits']['CPU'], container_tags[c_id])
+                self.gauge('fargate.cpu.limit', container['Limits']['CPU'], container_tags[c_id])
             if container['Limits']['Memory'] > 0:
-                self.gauge('ecs.mem.limit', container['Limits']['Memory'], container_tags[c_id])
+                self.gauge('fargate.mem.limit', container['Limits']['Memory'], container_tags[c_id])
 
         try:
             request = requests.get(stats_endpoint, timeout=timeout)
         except requests.exceptions.Timeout as e:
-            msg = 'ECS {} endpoint timed out after {} seconds'.format(stats_endpoint, timeout)
-            self.service_check('ecs_check', AgentCheck.WARNING, message=msg)
+            msg = 'Fargate {} endpoint timed out after {} seconds'.format(stats_endpoint, timeout)
+            self.service_check('fargate_check', AgentCheck.WARNING, message=msg)
             self.log.warning(msg)
             return
         except Exception as e:
-            msg = 'Error fetching ECS {} endpoint'.format(stats_endpoint)
-            self.service_check('ecs_check', AgentCheck.WARNING, message=msg)
+            msg = 'Error fetching Fargate {} endpoint'.format(stats_endpoint)
+            self.service_check('fargate_check', AgentCheck.WARNING, message=msg)
             self.log.warning(msg)
             return
 
         if request.status_code != 200:
-            msg = 'ECS {} endpoint responded with {} HTTP code'.format(stats_endpoint, request.status_code)
-            self.service_check('ecs_check', AgentCheck.WARNING, message=msg)
+            msg = 'Fargate {} endpoint responded with {} HTTP code'.format(stats_endpoint, request.status_code)
+            self.service_check('fargate_check', AgentCheck.WARNING, message=msg)
             self.log.warning(msg)
             return
 
@@ -104,30 +104,30 @@ class EcsCheck(AgentCheck):
         try:
             stats = request.json()
         except:
-            msg = 'Cannot decode ECS {} endpoint response'.format(stats_endpoint)
-            self.service_check('ecs_check', AgentCheck.WARNING, message=msg)
+            msg = 'Cannot decode Fargate {} endpoint response'.format(stats_endpoint)
+            self.service_check('fargate_check', AgentCheck.WARNING, message=msg)
 
         for container_id, container_stats in stats.iteritems():
             # CPU metrics
             tags = container_tags[container_id]
-            self.rate('ecs.cpu.system', container_stats['cpu_stats']['system_cpu_usage'], tags)
-            self.rate('ecs.cpu.user', container_stats['cpu_stats']['cpu_usage']['total_usage'],tags)
+            self.rate('fargate.cpu.system', container_stats['cpu_stats']['system_cpu_usage'], tags)
+            self.rate('fargate.cpu.user', container_stats['cpu_stats']['cpu_usage']['total_usage'],tags)
             # Memory metrics
             memory_gauge_metrics = ['cache','mapped_file','rss','hierarchical_memory_limit','active_anon',
                                     'active_file','inactive_file','hierarchical_memsw_limit']
             for metric in memory_gauge_metrics:
                 value = container_stats['memory_stats']['stats'][metric]
                 if value < CGROUP_NO_VALUE:
-                    self.gauge('ecs.mem.' + metric, value, tags)
+                    self.gauge('fargate.mem.' + metric, value, tags)
             memory_rate_metrics = ['pgpgin', 'pgpgout', 'pgmajfault','pgfault']
             for metric in memory_rate_metrics:
                 value = container_stats['memory_stats']['stats'][metric]
-                self.rate('ecs.mem.' + metric, value, tags)
-            self.gauge('ecs.mem.max_usage', container_stats['memory_stats']['max_usage'], tags)
-            self.gauge('ecs.mem.usage', container_stats['memory_stats']['usage'], tags)
-            self.gauge('ecs.mem.limit', container_stats['memory_stats']['max_usage'], tags)
+                self.rate('fargate.mem.' + metric, value, tags)
+            self.gauge('fargate.mem.max_usage', container_stats['memory_stats']['max_usage'], tags)
+            self.gauge('fargate.mem.usage', container_stats['memory_stats']['usage'], tags)
+            self.gauge('fargate.mem.limit', container_stats['memory_stats']['max_usage'], tags)
             # I/O metrics
-            for blkio_cat, metric_name in {'io_service_bytes_recursive':'ecs.io.bytes.', 'io_serviced_recursive':'ecs.io.ops.'}.iteritems():
+            for blkio_cat, metric_name in {'io_service_bytes_recursive':'fargate.io.bytes.', 'io_serviced_recursive':'fargate.io.ops.'}.iteritems():
                 read_counter = write_counter = 0
                 for blkio_stat in container_stats["blkio_stats"][blkio_cat]:
                     if blkio_stat["op"] == "Read" and "value" in blkio_stat:
@@ -137,4 +137,4 @@ class EcsCheck(AgentCheck):
                 self.rate(metric_name + 'read', read_counter, tags)
                 self.rate(metric_name + 'write', write_counter, tags)
 
-        self.service_check('ecs_check', AgentCheck.OK)
+        self.service_check('fargate_check', AgentCheck.OK)

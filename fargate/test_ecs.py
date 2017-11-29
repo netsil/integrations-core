@@ -22,14 +22,14 @@ instance = {
 
 # NOTE: Feel free to declare multiple test classes if needed
 
-@attr(requires='ecs')
+@attr(requires='fargate')
 class TestEcs(AgentCheckTest):
-    """Basic Test for ecs integration."""
-    CHECK_NAME = 'ecs'
+    """Basic Test for fargate integration."""
+    CHECK_NAME = 'fargate'
 
     def test_check(self):
         """
-        Testing Ecs check.
+        Testing fargate check.
         """
         self.load_check({}, {})
 
