@@ -1,5 +1,9 @@
 # CHANGELOG - mongo
 
+1.3.0 / UNRELEASED
+==================
+* [FEATURE] Add support for `authSource` parameter in mongo URL. See [#691][]
+
 1.2.0 / Unreleased
 ==================
 ### Changes
