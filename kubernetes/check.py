@@ -562,7 +562,7 @@ class Kubernetes(AgentCheck):
             msg_body = "%%%\n{}\n```\n{}\n```\n%%%".format(title, message)
             dd_event = {
                 'timestamp': event_ts,
-                'host': node_ip,
+                'host': node_name,
                 'event_type': EVENT_TYPE,
                 'msg_title': title,
                 'msg_text': msg_body,
