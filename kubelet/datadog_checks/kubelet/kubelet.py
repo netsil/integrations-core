@@ -1,161 +1,293 @@
 # (C) Datadog, Inc. 2016-2017
 # All rights reserved
 # Licensed under Simplified BSD License (see LICENSE)
+from __future__ import division
 
-# stdlib
+import json
 import logging
 import re
-from urlparse import urljoin
+from collections import defaultdict
+from copy import deepcopy
+from datetime import datetime, timedelta
 
-# 3p
 import requests
-
-# project
-from datadog_checks.checks import AgentCheck
-from datadog_checks.errors import CheckException
-from datadog_checks.checks.prometheus import PrometheusCheck
 from kubeutil import get_connection_info
-from tagger import get_tags
+from six import iteritems
+from six.moves.urllib.parse import urljoin
 
-METRIC_TYPES = ['counter', 'gauge', 'summary']
-# container-specific metrics should have all these labels
-CONTAINER_LABELS = ['container_name', 'namespace', 'pod_name', 'name', 'image', 'id']
+from datadog_checks.base.utils.date import UTC, parse_rfc3339
+from datadog_checks.base.utils.tagging import tagger
+from datadog_checks.checks import AgentCheck
+from datadog_checks.checks.openmetrics import OpenMetricsBaseCheck
+from datadog_checks.errors import CheckException
+
+from .cadvisor import CadvisorScraper
+from .common import CADVISOR_DEFAULT_PORT, KubeletCredentials, PodListUtils, replace_container_rt_prefix
+from .prometheus import CadvisorPrometheusScraperMixin
+
+try:
+    from datadog_agent import get_config
+except ImportError:
+
+    def get_config(key):
+        return ""
+
 
 KUBELET_HEALTH_PATH = '/healthz'
 NODE_SPEC_PATH = '/spec'
-POD_LIST_PATH = '/pods/'
+POD_LIST_PATH = '/pods'
 CADVISOR_METRICS_PATH = '/metrics/cadvisor'
+KUBELET_METRICS_PATH = '/metrics'
 
 # Suffixes per
 # https://github.com/kubernetes/kubernetes/blob/8fd414537b5143ab039cb910590237cabf4af783/pkg/api/resource/suffix.go#L108
 FACTORS = {
-    'n': float(1)/(1000*1000*1000),
-    'u': float(1)/(1000*1000),
-    'm': float(1)/1000,
+    'n': float(1) / (1000 * 1000 * 1000),
+    'u': float(1) / (1000 * 1000),
+    'm': float(1) / 1000,
     'k': 1000,
-    'M': 1000*1000,
-    'G': 1000*1000*1000,
-    'T': 1000*1000*1000*1000,
-    'P': 1000*1000*1000*1000*1000,
-    'E': 1000*1000*1000*1000*1000*1000,
+    'M': 1000 * 1000,
+    'G': 1000 * 1000 * 1000,
+    'T': 1000 * 1000 * 1000 * 1000,
+    'P': 1000 * 1000 * 1000 * 1000 * 1000,
+    'E': 1000 * 1000 * 1000 * 1000 * 1000 * 1000,
     'Ki': 1024,
-    'Mi': 1024*1024,
-    'Gi': 1024*1024*1024,
-    'Ti': 1024*1024*1024*1024,
-    'Pi': 1024*1024*1024*1024*1024,
-    'Ei': 1024*1024*1024*1024*1024*1024,
+    'Mi': 1024 * 1024,
+    'Gi': 1024 * 1024 * 1024,
+    'Ti': 1024 * 1024 * 1024 * 1024,
+    'Pi': 1024 * 1024 * 1024 * 1024 * 1024,
+    'Ei': 1024 * 1024 * 1024 * 1024 * 1024 * 1024,
 }
+
+
+WHITELISTED_CONTAINER_STATE_REASONS = {
+    'waiting': ['errimagepull', 'imagepullbackoff', 'crashloopbackoff', 'containercreating'],
+    'terminated': ['oomkilled', 'containercannotrun', 'error'],
+}
+
 
 log = logging.getLogger('collector')
 
 
-class KubeletCheck(PrometheusCheck):
+class ExpiredPodFilter(object):
     """
-    Collect container metrics from Kubelet.
+    Allows to filter old pods out of the podlist by providing a decoding hook
     """
-    def __init__(self, name, init_config, agentConfig, instances=None):
-        super(KubeletCheck, self).__init__(name, init_config, agentConfig, instances)
-        self.NAMESPACE = 'kubernetes'
 
+    def __init__(self, cutoff_date):
+        self.expired_count = 0
+        self.cutoff_date = cutoff_date
+
+    def json_hook(self, obj):
+        # Not a pod (hook is called for all objects)
+        if 'metadata' not in obj or 'status' not in obj:
+            return obj
+
+        # Quick exit for running/pending containers
+        pod_phase = obj.get('status', {}).get('phase')
+        if pod_phase in ["Running", "Pending"]:
+            return obj
+
+        # Filter out expired terminated pods, based on container finishedAt time
+        expired = True
+        for ctr in obj['status'].get('containerStatuses', []):
+            if "terminated" not in ctr.get("state", {}):
+                expired = False
+                break
+            finishedTime = ctr["state"]["terminated"].get("finishedAt")
+            if not finishedTime:
+                expired = False
+                break
+            if parse_rfc3339(finishedTime) > self.cutoff_date:
+                expired = False
+                break
+        if not expired:
+            return obj
+
+        # We are ignoring this pod
+        self.expired_count += 1
+        return None
+
+
+class KubeletCheck(CadvisorPrometheusScraperMixin, OpenMetricsBaseCheck, CadvisorScraper):
+    """
+    Collect metrics from Kubelet.
+    """
+
+    DEFAULT_METRIC_LIMIT = 0
+
+    def __init__(self, name, init_config, agentConfig, instances=None):
+        self.NAMESPACE = 'kubernetes'
         if instances is not None and len(instances) > 1:
             raise Exception('Kubelet check only supports one configured instance.')
         inst = instances[0] if instances else None
 
-        self.kube_node_labels = inst.get('node_labels_to_host_tags', {})
-        self.metrics_mapper = {
-            'kubelet_runtime_operations_errors': 'kubelet.runtime.errors',
-        }
-        self.ignore_metrics = [
-            'container_cpu_cfs_periods_total',
-            'container_cpu_cfs_throttled_periods_total',
-            'container_cpu_cfs_throttled_seconds_total',
-            'container_cpu_load_average_10s',
-            'container_cpu_system_seconds_total',
-            'container_cpu_user_seconds_total',
-            'container_fs_inodes_free',
-            'container_fs_inodes_total',
-            'container_fs_io_current',
-            'container_fs_io_time_seconds_total',
-            'container_fs_io_time_weighted_seconds_total',
-            'container_fs_read_seconds_total',
-            'container_fs_reads_merged_total',
-            'container_fs_reads_total',
-            'container_fs_sector_reads_total',
-            'container_fs_sector_writes_total',
-            'container_fs_write_seconds_total',
-            'container_fs_writes_merged_total',
-            'container_fs_writes_total',
-            'container_last_seen',
-            'container_start_time_seconds',
-            'container_spec_memory_swap_limit_bytes',
-            'container_scrape_error'
-        ]
+        cadvisor_instance = self._create_cadvisor_prometheus_instance(inst)
+        kubelet_instance = self._create_kubelet_prometheus_instance(inst)
+        generic_instances = [cadvisor_instance, kubelet_instance]
+        super(KubeletCheck, self).__init__(name, init_config, agentConfig, generic_instances)
 
-        # these are filled by container_<metric-name>_usage_<metric-unit>
-        # and container_<metric-name>_limit_<metric-unit> reads it to compute <metric-name>usage_pct
-        self.fs_usage_bytes = {}
-        self.mem_usage_bytes = {}
+        self.cadvisor_legacy_port = inst.get('cadvisor_port', CADVISOR_DEFAULT_PORT)
+        self.cadvisor_legacy_url = None
+
+        self.cadvisor_scraper_config = self.get_scraper_config(cadvisor_instance)
+        # Filter out system slices (empty pod name) to reduce memory footprint
+        self.cadvisor_scraper_config['_text_filter_blacklist'] = ['pod_name=""']
+
+        self.kubelet_scraper_config = self.get_scraper_config(kubelet_instance)
+
+    def _create_kubelet_prometheus_instance(self, instance):
+        """
+        Create a copy of the instance and set default values.
+        This is so the base class can create a scraper_config with the proper values.
+        """
+        kubelet_instance = deepcopy(instance)
+        kubelet_instance.update(
+            {
+                'namespace': self.NAMESPACE,
+                # We need to specify a prometheus_url so the base class can use it as the key for our config_map,
+                # we specify a dummy url that will be replaced in the `check()` function. We append it with "kubelet"
+                # so the key is different than the cadvisor scraper.
+                'prometheus_url': instance.get('kubelet_metrics_endpoint', 'dummy_url/kubelet'),
+                'metrics': [
+                    {
+                        'apiserver_client_certificate_expiration_seconds': 'apiserver.certificate.expiration',
+                        'rest_client_requests_total': 'rest.client.requests',
+                        'rest_client_request_latency_seconds': 'rest.client.latency',
+                        'kubelet_runtime_operations': 'kubelet.runtime.operations',
+                        'kubelet_runtime_operations_errors': 'kubelet.runtime.errors',
+                        'kubelet_network_plugin_operations_latency_microseconds': 'kubelet.network_plugin.latency',
+                        'kubelet_volume_stats_available_bytes': 'kubelet.volume.stats.available_bytes',
+                        'kubelet_volume_stats_capacity_bytes': 'kubelet.volume.stats.capacity_bytes',
+                        'kubelet_volume_stats_used_bytes': 'kubelet.volume.stats.used_bytes',
+                        'kubelet_volume_stats_inodes': 'kubelet.volume.stats.inodes',
+                        'kubelet_volume_stats_inodes_free': 'kubelet.volume.stats.inodes_free',
+                        'kubelet_volume_stats_inodes_used': 'kubelet.volume.stats.inodes_used',
+                    }
+                ],
+                # Defaults that were set when the Kubelet scraper was based on PrometheusScraper
+                'send_monotonic_counter': instance.get('send_monotonic_counter', False),
+                'health_service_check': instance.get('health_service_check', False),
+            }
+        )
+        return kubelet_instance
 
     def check(self, instance):
-        self.kubelet_conn_info = get_connection_info()
-        endpoint = self.kubelet_conn_info.get('url')
+        kubelet_conn_info = get_connection_info()
+        endpoint = kubelet_conn_info.get('url')
         if endpoint is None:
-            raise CheckException("Unable to find metrics_endpoint in config "
-                                 "file or detect the kubelet URL automatically.")
+            raise CheckException("Unable to detect the kubelet URL automatically.")
 
-        self.metrics_url = instance.get('metrics_endpoint') or urljoin(endpoint, CADVISOR_METRICS_PATH)
         self.kube_health_url = urljoin(endpoint, KUBELET_HEALTH_PATH)
         self.node_spec_url = urljoin(endpoint, NODE_SPEC_PATH)
         self.pod_list_url = urljoin(endpoint, POD_LIST_PATH)
+        self.instance_tags = instance.get('tags', [])
+        self.kubelet_credentials = KubeletCredentials(kubelet_conn_info)
 
-        # By default we send the buckets.
-        send_buckets = instance.get('send_histograms_buckets', True)
-        if send_buckets is not None and str(send_buckets).lower() == 'false':
-            send_buckets = False
+        # Test the kubelet health ASAP
+        self._perform_kubelet_check(self.instance_tags)
+
+        if 'cadvisor_metrics_endpoint' in instance:
+            self.cadvisor_scraper_config['prometheus_url'] = instance.get(
+                'cadvisor_metrics_endpoint', urljoin(endpoint, CADVISOR_METRICS_PATH)
+            )
         else:
-            send_buckets = True
+            self.cadvisor_scraper_config['prometheus_url'] = instance.get(
+                'metrics_endpoint', urljoin(endpoint, CADVISOR_METRICS_PATH)
+            )
 
+        if 'metrics_endpoint' in instance:
+            self.log.warning('metrics_endpoint is deprecated, please specify cadvisor_metrics_endpoint instead.')
+
+        self.kubelet_scraper_config['prometheus_url'] = instance.get(
+            'kubelet_metrics_endpoint', urljoin(endpoint, KUBELET_METRICS_PATH)
+        )
+
+        # Kubelet credentials handling
+        self.kubelet_credentials.configure_scraper(self.cadvisor_scraper_config)
+        self.kubelet_credentials.configure_scraper(self.kubelet_scraper_config)
+
+        # Legacy cadvisor support
         try:
-            self.pod_list = self.retrieve_pod_list()
-        except Exception:
-            self.pod_list = None
+            self.cadvisor_legacy_url = self.detect_cadvisor(endpoint, self.cadvisor_legacy_port)
+        except Exception as e:
+            self.log.debug('cAdvisor not found, running in prometheus mode: %s' % str(e))
 
-        instance_tags = instance.get('tags', [])
-        self._perform_kubelet_check(instance_tags)
-        self._report_node_metrics(instance_tags)
-        self._report_pods_running(self.pod_list, instance_tags)
-        self._report_container_spec_metrics(self.pod_list, instance_tags)
-        self.process(self.metrics_url, send_histograms_buckets=send_buckets, instance=instance)
+        self.pod_list = self.retrieve_pod_list()
+        self.pod_list_utils = PodListUtils(self.pod_list)
 
-    def perform_kubelet_query(self, url, verbose=True, timeout=10):
+        self._report_node_metrics(self.instance_tags)
+        self._report_pods_running(self.pod_list, self.instance_tags)
+        self._report_container_spec_metrics(self.pod_list, self.instance_tags)
+        self._report_container_state_metrics(self.pod_list, self.instance_tags)
+
+        if self.cadvisor_legacy_url:  # Legacy cAdvisor
+            self.log.debug('processing legacy cadvisor metrics')
+            self.process_cadvisor(instance, self.cadvisor_legacy_url, self.pod_list, self.pod_list_utils)
+        elif self.cadvisor_scraper_config['prometheus_url']:  # Prometheus
+            self.log.debug('processing cadvisor metrics')
+            self.process(self.cadvisor_scraper_config, metric_transformers=self.CADVISOR_METRIC_TRANSFORMERS)
+
+        if self.kubelet_scraper_config['prometheus_url']:  # Prometheus
+            self.log.debug('processing kubelet metrics')
+            self.process(self.kubelet_scraper_config)
+
+        # Free up memory
+        self.pod_list = None
+        self.pod_list_utils = None
+
+    def perform_kubelet_query(self, url, verbose=True, timeout=10, stream=False):
         """
         Perform and return a GET request against kubelet. Support auth and TLS validation.
         """
-        headers = None
-        cert = (self.kubelet_conn_info.get('client_crt'), self.kubelet_conn_info.get('client_key'))
-        if not cert[0] or not cert[1]:
-            cert = None
-        else:
-            self.ssl_cert = cert  # prometheus check setting
-
-        if self.kubelet_conn_info.get('verify_tls') == 'false':
-            verify = False
-        else:
-            verify = self.kubelet_conn_info.get('ca_cert')
-        self.ssl_ca_cert = verify  # prometheus check setting
-
-        # if cert-based auth is enabled, don't use the token.
-        if not cert and url.lower().startswith('https') and 'token' in self.kubelet_conn_info:
-            headers = {'Authorization': 'Bearer {}'.format(self.kubelet_conn_info['token'])}
-            self.extra_headers = headers  # prometheus check setting
-
-        return requests.get(url, timeout=timeout, verify=verify,
-                            cert=cert, headers=headers, params={'verbose': verbose})
+        return requests.get(
+            url,
+            timeout=timeout,
+            verify=self.kubelet_credentials.verify(),
+            cert=self.kubelet_credentials.cert_pair(),
+            headers=self.kubelet_credentials.headers(url),
+            params={'verbose': verbose},
+            stream=stream,
+        )
 
     def retrieve_pod_list(self):
-        return self.perform_kubelet_query(self.pod_list_url).json()
+        try:
+            cutoff_date = self._compute_pod_expiration_datetime()
+            with self.perform_kubelet_query(self.pod_list_url, stream=True) as r:
+                if cutoff_date:
+                    f = ExpiredPodFilter(cutoff_date)
+                    pod_list = json.load(r.raw, object_hook=f.json_hook)
+                    pod_list['expired_count'] = f.expired_count
+                    if pod_list.get("items") is not None:
+                        # Filter out None items from the list
+                        pod_list['items'] = [p for p in pod_list['items'] if p is not None]
+                else:
+                    pod_list = json.load(r.raw)
 
-    def retrieve_node_spec(self):
+            if pod_list.get("items") is None:
+                # Sanitize input: if no pod are running, 'items' is a NoneObject
+                pod_list['items'] = []
+            return pod_list
+        except Exception as e:
+            self.log.warning('failed to retrieve pod list from the kubelet at %s : %s' % (self.pod_list_url, str(e)))
+            return None
+
+    @staticmethod
+    def _compute_pod_expiration_datetime():
+        """
+        Looks up the agent's kubernetes_pod_expiration_duration option and returns either:
+          - None if expiration is disabled (set to 0)
+          - A (timezone aware) datetime object to compare against
+        """
+        try:
+            seconds = int(get_config("kubernetes_pod_expiration_duration"))
+            if seconds == 0:  # Expiration disabled
+                return None
+            return datetime.utcnow().replace(tzinfo=UTC) - timedelta(seconds=seconds)
+        except (ValueError, TypeError):
+            return None
+
+    def _retrieve_node_spec(self):
         """
         Retrieve node spec from kubelet.
         """
@@ -165,7 +297,7 @@ class KubeletCheck(PrometheusCheck):
         return node_spec
 
     def _report_node_metrics(self, instance_tags):
-        node_spec = self.retrieve_node_spec()
+        node_spec = self._retrieve_node_spec()
         num_cores = node_spec.get('num_cores', 0)
         memory_capacity = node_spec.get('memory_capacity', 0)
 
@@ -181,7 +313,7 @@ class KubeletCheck(PrometheusCheck):
 
         try:
             req = self.perform_kubelet_query(url)
-            for line in req.iter_lines():
+            for line in req.iter_lines(decode_unicode=True):
                 # avoid noise; this check is expected to fail since we override the container hostname
                 if line.find('hostname') != -1:
                     continue
@@ -200,8 +332,12 @@ class KubeletCheck(PrometheusCheck):
 
         except Exception as e:
             self.log.warning('kubelet check %s failed: %s' % (url, str(e)))
-            self.service_check(service_check_base, AgentCheck.CRITICAL,
-                               message='Kubelet check %s failed: %s' % (url, str(e)), tags=instance_tags)
+            self.service_check(
+                service_check_base,
+                AgentCheck.CRITICAL,
+                message='Kubelet check %s failed: %s' % (url, str(e)),
+                tags=instance_tags,
+            )
         else:
             if is_ok:
                 self.service_check(service_check_base, AgentCheck.OK, tags=instance_tags)
@@ -210,28 +346,56 @@ class KubeletCheck(PrometheusCheck):
 
     def _report_pods_running(self, pods, instance_tags):
         """
-        Reports the number of running pods on this node
-        tagged by service and creator.
+        Reports the number of running pods on this node and the running
+        containers in pods, tagged by service and creator.
+
+        :param pods: pod list object
+        :param instance_tags: list of tags
         """
-        tag_counter = {}
+        pods_tag_counter = defaultdict(int)
+        containers_tag_counter = defaultdict(int)
         for pod in pods['items']:
+            # Containers reporting
+            containers = pod.get('status', {}).get('containerStatuses', [])
+            has_container_running = False
+            for container in containers:
+                container_id = container.get('containerID')
+                if not container_id:
+                    self.log.debug('skipping container with no id')
+                    continue
+                if "running" not in container.get('state', {}):
+                    continue
+                has_container_running = True
+                tags = tagger.tag(replace_container_rt_prefix(container_id), tagger.LOW) or None
+                if not tags:
+                    continue
+                tags += instance_tags
+                hash_tags = tuple(sorted(tags))
+                containers_tag_counter[hash_tags] += 1
+            # Pod reporting
+            if not has_container_running:
+                continue
             pod_id = pod.get('metadata', {}).get('uid')
-            tags = get_tags('kubernetes_pod://%s' % pod_id, False) or None
+            if not pod_id:
+                self.log.debug('skipping pod with no uid')
+                continue
+            tags = tagger.tag('kubernetes_pod_uid://%s' % pod_id, tagger.LOW) or None
             if not tags:
                 continue
+            tags += instance_tags
             hash_tags = tuple(sorted(tags))
-            if hash_tags in tag_counter.keys():
-                tag_counter[hash_tags] += 1
-            else:
-                tag_counter[hash_tags] = 1
-        for tags, count in tag_counter.iteritems():
+            pods_tag_counter[hash_tags] += 1
+        for tags, count in iteritems(pods_tag_counter):
             self.gauge(self.NAMESPACE + '.pods.running', count, list(tags))
+        for tags, count in iteritems(containers_tag_counter):
+            self.gauge(self.NAMESPACE + '.containers.running', count, list(tags))
 
     def _report_container_spec_metrics(self, pod_list, instance_tags):
         """Reports pod requests & limits by looking at pod specs."""
         for pod in pod_list['items']:
             pod_name = pod.get('metadata', {}).get('name')
-            if not pod_name:
+            pod_phase = pod.get('status', {}).get('phase')
+            if self._should_ignore_pod(pod_name, pod_phase):
                 continue
 
             for ctr in pod['spec']['containers']:
@@ -240,325 +404,112 @@ class KubeletCheck(PrometheusCheck):
 
                 c_name = ctr.get('name', '')
                 cid = None
-
                 for ctr_status in pod['status'].get('containerStatuses', []):
                     if ctr_status.get('name') == c_name:
-                        # it is already prefixed with 'docker://'
+                        # it is already prefixed with 'runtime://'
                         cid = ctr_status.get('containerID')
                         break
                 if not cid:
                     continue
 
-                tags = get_tags('%s' % cid, True)
+                pod_uid = pod.get('metadata', {}).get('uid')
+                if self.pod_list_utils.is_excluded(cid, pod_uid):
+                    continue
+
+                tags = instance_tags[:]
+                tags += tagger.tag('%s' % replace_container_rt_prefix(cid), tagger.HIGH) or []
 
                 try:
-                    for resource, value_str in ctr.get('resources', {}).get('requests', {}).iteritems():
+                    for resource, value_str in iteritems(ctr.get('resources', {}).get('requests', {})):
                         value = self.parse_quantity(value_str)
                         self.gauge('{}.{}.requests'.format(self.NAMESPACE, resource), value, tags)
                 except (KeyError, AttributeError) as e:
                     self.log.debug("Unable to retrieve container requests for %s: %s", c_name, e)
 
                 try:
-                    for resource, value_str in ctr.get('resources', {}).get('limits', {}).iteritems():
+                    for resource, value_str in iteritems(ctr.get('resources', {}).get('limits', {})):
                         value = self.parse_quantity(value_str)
                         self.gauge('{}.{}.limits'.format(self.NAMESPACE, resource), value, tags)
                 except (KeyError, AttributeError) as e:
                     self.log.debug("Unable to retrieve container limits for %s: %s", c_name, e)
 
-    @staticmethod
-    def parse_quantity(s):
-        number = ''
-        unit = ''
-        for c in s:
-            if c.isdigit() or c == '.':
-                number += c
-            else:
-                unit += c
-        return float(number) * FACTORS.get(unit, 1)
+    def _report_container_state_metrics(self, pod_list, instance_tags):
+        """Reports container state & reasons by looking at container statuses"""
+        if pod_list.get('expired_count'):
+            self.gauge(self.NAMESPACE + '.pods.expired', pod_list.get('expired_count'), tags=instance_tags)
 
-    def _is_container_metric(self, metric):
-        """
-        Return whether a metric is about a container or not.
-        It can be about pods, or even higher levels in the cgroup hierarchy
-        and we don't want to report on that.
-        """
-        for lbl in CONTAINER_LABELS:
-            if lbl == 'container_name':
-                for ml in metric.label:
-                    if ml.name == lbl:
-                        if ml.value == '' or ml.value == 'POD':
-                            return False
-            if lbl not in [ml.name for ml in metric.label]:
-                return False
-        return True
+        for pod in pod_list['items']:
+            pod_name = pod.get('metadata', {}).get('name')
+            pod_uid = pod.get('metadata', {}).get('uid')
 
-    def _is_pod_metric(self, metric):
-        """
-        Return whether a metric is about a pod or not.
-        It can be about containers, pods, or higher levels in the cgroup hierarchy
-        and we don't want to report on that.
-        """
-        for ml in metric.label:
-            if ml.name == 'container_name' and ml.value == 'POD':
-                return True
-            # container_cpu_usage_seconds_total has an id label that is a cgroup path
-            # eg: /kubepods/burstable/pod531c80d9-9fc4-11e7-ba8b-42010af002bb
-            # FIXME: this was needed because of a bug:
-            # https://github.com/kubernetes/kubernetes/pull/51473
-            # starting from k8s 1.8 we can remove this
-            elif ml.name == 'id' and ml.value.split('/')[-1].startswith('pod'):
-                return True
-        return False
-
-    def _get_container_label(self, labels, l_name):
-        for label in labels:
-            if label.name == l_name:
-                return label.value
-
-    def _get_container_id(self, labels):
-        """
-        Should only be called on a container-scoped metric
-        as it doesn't do any validation of the container id.
-        It simply returns the last part of the cgroup hierarchy.
-        """
-        for label in labels:
-            if label.name == 'id':
-                return label.value.split('/')[-1]
-
-    @staticmethod
-    def _get_pod_uid(labels):
-        for label in labels:
-            if label.name == 'id':
-                for part in label.value.split('/'):
-                    if part.startswith('pod'):
-                        return part[3:]
-
-    def _is_pod_host_networked(self, pod_uid):
-        for pod in self.pod_list['items']:
-            if pod.get('metadata', {}).get('uid', '') == pod_uid:
-                return pod.get('spec', {}).get('hostNetwork', False)
-        return False
-
-    def _get_pod_by_metric_label(self, labels):
-        """
-        :param labels: metric labels: iterable
-        :return:
-        """
-        pod_uid = self._get_pod_uid(labels)
-        for pod in self.pod_list["items"]:
-            try:
-                if pod["metadata"]["uid"] == pod_uid:
-                    return pod
-            except KeyError:
+            if not pod_name or not pod_uid:
                 continue
 
-        return None
+            for ctr_status in pod['status'].get('containerStatuses', []):
+                c_name = ctr_status.get('name')
+                cid = ctr_status.get('containerID')
+
+                if not c_name or not cid:
+                    continue
+
+                if self.pod_list_utils.is_excluded(cid, pod_uid):
+                    continue
+
+                tags = instance_tags[:]
+                tags += tagger.tag('%s' % replace_container_rt_prefix(cid), tagger.ORCHESTRATOR) or []
+
+                restart_count = ctr_status.get('restartCount', 0)
+                self.gauge(self.NAMESPACE + '.containers.restarts', restart_count, tags)
+
+                for (metric_name, field_name) in [('state', 'state'), ('last_state', 'lastState')]:
+                    c_state = ctr_status.get(field_name, {})
+
+                    for state_name in ['terminated', 'waiting']:
+                        state_reasons = WHITELISTED_CONTAINER_STATE_REASONS.get(state_name, [])
+                        self._submit_container_state_metric(metric_name, state_name, c_state, state_reasons, tags)
+
+    def _submit_container_state_metric(self, metric_name, state_name, c_state, state_reasons, tags):
+        reason_tags = []
+
+        state_value = c_state.get(state_name)
+        if state_value:
+            reason = state_value.get('reason', '')
+
+            if reason.lower() in state_reasons:
+                reason_tags.append('reason:%s' % (reason))
+            else:
+                return
+
+            gauge_name = '{}.containers.{}.{}'.format(self.NAMESPACE, metric_name, state_name)
+            self.gauge(gauge_name, 1, tags + reason_tags)
 
     @staticmethod
-    def _is_static_pending_pod(pod):
+    def parse_quantity(string):
         """
-        Return if the pod is a static pending pod
-        See https://github.com/kubernetes/kubernetes/pull/57106
-        :param pod: dict
-        :return: bool
+        Parse quantity allows to convert the value in the resources spec like:
+        resources:
+          requests:
+            cpu: "100m"
+            memory": "200Mi"
+          limits:
+            memory: "300Mi"
+        :param string: str
+        :return: float
         """
-        try:
-            if pod["metadata"]["annotations"]["kubernetes.io/config.source"] == "api":
-                return False
-
-            pod_status = pod["status"]
-            if pod_status["phase"] != "Pending":
-                return False
-
-            return "containerStatuses" not in pod_status
-        except KeyError:
-            return False
+        number, unit = '', ''
+        for char in string:
+            if char.isdigit() or char == '.':
+                number += char
+            else:
+                unit += char
+        return float(number) * FACTORS.get(unit, 1)
 
     @staticmethod
-    def _get_tags_from_labels(labels):
+    def _should_ignore_pod(name, phase):
         """
-        Get extra tags from metric labels
-        label {
-          name: "container_name"
-          value: "kube-proxy"
-        }
-        :param labels: metric labels: iterable
-        :return: list
+        Pods that are neither pending or running should not be counted
+        in resource requests and limits.
         """
-        tags = []
-        for label in labels:
-            if label.name == "container_name":
-                tags.append("kube_container_name:%s" % label.value)
-                return tags
-
-        return tags
-
-    def _process_container_rate(self, metric_name, message):
-        """Takes a simple metric about a container, reports it as a rate."""
-        if message.type >= len(METRIC_TYPES):
-            self.log.error("Metric type %s unsupported for metric %s" % (message.type, message.name))
-            return
-
-        for metric in message.metric:
-            if self._is_container_metric(metric):
-                c_id = self._get_container_id(metric.label)
-                tags = get_tags('docker://%s' % c_id, True)
-
-                # FIXME we are forced to do that because the Kubelet PodList isn't updated
-                # for static pods, see https://github.com/kubernetes/kubernetes/pull/59948
-                pod = self._get_pod_by_metric_label(metric.label)
-                if pod is not None and self._is_static_pending_pod(pod):
-                    tags += get_tags('kubernetes_pod://%s' % pod["metadata"]["uid"], True)
-                    tags += self._get_tags_from_labels(metric.label)
-                    tags = list(set(tags))
-
-                val = getattr(metric, METRIC_TYPES[message.type]).value
-                self.rate(metric_name, val, tags)
-
-    def _process_pod_rate(self, metric_name, message):
-        """Takes a simple metric about a pod, reports it as a rate."""
-        if message.type >= len(METRIC_TYPES):
-            self.log.error("Metric type %s unsupported for metric %s" % (message.type, message.name))
-            return
-
-        for metric in message.metric:
-            if self._is_pod_metric(metric):
-                pod_uid = self._get_pod_uid(metric.label)
-                if '.network.' in metric_name and self._is_pod_host_networked(pod_uid):
-                    continue
-                tags = get_tags('kubernetes_pod://%s' % pod_uid, True)
-                val = getattr(metric, METRIC_TYPES[message.type]).value
-                self.rate(metric_name, val, tags)
-
-    def _process_usage_metric(self, m_name, message, cache):
-        """
-        Takes a metrics message, a metric name, and a cache dict where it will store
-        container_name --> (value, tags) so that _process_limit_metric can compute usage_pct
-        it also submit said value and tags as a gauge.
-        """
-        # track containers that still exist in the cache
-        seen_keys = {k: False for k in cache}
-        for metric in message.metric:
-            if self._is_container_metric(metric):
-                c_id = self._get_container_id(metric.label)
-                c_name = self._get_container_label(metric.label, 'name')
-                if not c_name:
-                    continue
-                tags = get_tags('docker://%s' % c_id, True)
-
-                # FIXME we are forced to do that because the Kubelet PodList isn't updated
-                # for static pods, see https://github.com/kubernetes/kubernetes/pull/59948
-                pod = self._get_pod_by_metric_label(metric.label)
-                if pod is not None and self._is_static_pending_pod(pod):
-                    tags += get_tags('kubernetes_pod://%s' % pod["metadata"]["uid"], True)
-                    tags += self._get_tags_from_labels(metric.label)
-                    tags = list(set(tags))
-
-                val = getattr(metric, METRIC_TYPES[message.type]).value
-                cache[c_name] = (val, tags)
-                seen_keys[c_name] = True
-                self.gauge(m_name, val, tags)
-
-        # purge the cache
-        for k, seen in seen_keys.iteritems():
-            if not seen:
-                del cache[k]
-
-    def _process_limit_metric(self, m_name, message, cache, pct_m_name=None):
-        """
-        Reports limit metrics if m_name is not an empty string,
-        and optionally checks in the given cache if there's a usage
-        for each metric in the message and reports the usage_pct
-        """
-        for metric in message.metric:
-            if self._is_container_metric(metric):
-                limit = getattr(metric, METRIC_TYPES[message.type]).value
-                c_id = self._get_container_id(metric.label)
-                tags = get_tags('docker://%s' % c_id, True)
-
-                if m_name:
-                    self.gauge(m_name, limit, tags)
-
-                if pct_m_name and limit > 0:
-                    c_name = self._get_container_label(metric.label, 'name')
-                    if not c_name:
-                        continue
-                    usage, tags = cache.get(c_name, (None, None))
-                    if usage:
-                        self.gauge(pct_m_name, float(usage/float(limit)), tags)
-                    else:
-                        self.log.debug("No corresponding usage found for metric %s and "
-                                       "container %s, skipping usage_pct for now." % (pct_m_name, c_name))
-
-    def container_cpu_usage_seconds_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.cpu.usage.total'
-        self._process_container_rate(metric_name, message)
-
-    def container_fs_reads_bytes_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.io.read_bytes'
-        self._process_container_rate(metric_name, message)
-
-    def container_fs_writes_bytes_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.io.write_bytes'
-        self._process_container_rate(metric_name, message)
-
-    def container_network_receive_bytes_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.network.rx_bytes'
-        self._process_pod_rate(metric_name, message)
-
-    def container_network_transmit_bytes_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.network.tx_bytes'
-        self._process_pod_rate(metric_name, message)
-
-    def container_network_receive_errors_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.network.rx_errors'
-        self._process_pod_rate(metric_name, message)
-
-    def container_network_transmit_errors_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.network.tx_errors'
-        self._process_pod_rate(metric_name, message)
-
-    def container_network_transmit_packets_dropped_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.network.tx_dropped'
-        self._process_pod_rate(metric_name, message)
-
-    def container_network_receive_packets_dropped_total(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.network.rx_dropped'
-        self._process_pod_rate(metric_name, message)
-
-    def container_fs_usage_bytes(self, message, **kwargs):
-        """
-        Number of bytes that are consumed by the container on this filesystem.
-        """
-        metric_name = self.NAMESPACE + '.filesystem.usage'
-        if message.type >= len(METRIC_TYPES):
-            self.log.error("Metric type %s unsupported for metric %s" % (message.type, message.name))
-            return
-        self._process_usage_metric(metric_name, message, self.fs_usage_bytes)
-
-    def container_fs_limit_bytes(self, message, **kwargs):
-        """
-        Number of bytes that can be consumed by the container on this filesystem.
-        This method is used by container_fs_usage_bytes, it doesn't report any metric
-        """
-        pct_m_name = self.NAMESPACE + '.filesystem.usage_pct'
-        if message.type >= len(METRIC_TYPES):
-            self.log.error("Metric type %s unsupported for metric %s" % (message.type, message.name))
-            return
-        self._process_limit_metric('', message, self.fs_usage_bytes, pct_m_name)
-
-    def container_memory_usage_bytes(self, message, **kwargs):
-        """TODO: add swap, cache, failcnt and rss"""
-        metric_name = self.NAMESPACE + '.memory.usage'
-        if message.type >= len(METRIC_TYPES):
-            self.log.error("Metric type %s unsupported for metric %s" % (message.type, message.name))
-            return
-        self._process_usage_metric(metric_name, message, self.mem_usage_bytes)
-
-    def container_spec_memory_limit_bytes(self, message, **kwargs):
-        metric_name = self.NAMESPACE + '.memory.limits'
-        pct_m_name = self.NAMESPACE + '.memory.usage_pct'
-        if message.type >= len(METRIC_TYPES):
-            self.log.error("Metric type %s unsupported for metric %s" % (message.type, message.name))
-            return
-        self._process_limit_metric(metric_name, message, self.mem_usage_bytes, pct_m_name)
+        if not name or phase not in ["Running", "Pending"]:
+            return True
+        return False

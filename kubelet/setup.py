@@ -1,9 +1,10 @@
 # (C) Datadog, Inc. 2018
 # All rights reserved
 # Licensed under a 3-clause BSD style license (see LICENSE)
-from setuptools import setup
 from codecs import open
 from os import path
+
+from setuptools import setup
 
 HERE = path.abspath(path.dirname(__file__))
 
@@ -23,23 +24,22 @@ def get_requirements(fpath):
         return f.readlines()
 
 
+CHECKS_BASE_REQ = 'datadog_checks_base >= 6.5.0'
+
 setup(
     name='datadog-kubelet',
     version=ABOUT["__version__"],
     description='The Kubelet check',
     long_description=long_description,
+    long_description_content_type='text/markdown',
     keywords='datadog agent kubelet check',
-
     # The project's main homepage.
     url='https://github.com/DataDog/integrations-core',
-
     # Author details
     author='Datadog',
     author_email='packages@datadoghq.com',
-
     # License
     license='New BSD',
-
     # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
     classifiers=[
         'Development Status :: 5 - Production/Stable',
@@ -50,20 +50,10 @@ setup(
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
     ],
-
     # The package we're going to ship
     packages=['datadog_checks.kubelet'],
-
     # Run-time dependencies
-    install_requires=get_requirements('requirements.in')+[
-        'datadog-checks-base',
-    ],
-
-    # Testing setup and dependencies
-    setup_requires=['pytest-runner', ],
-    tests_require=get_requirements(path.join('tests', 'requirements.txt')),
-
+    install_requires=[CHECKS_BASE_REQ],
     # Extra files to ship with the wheel package
-    package_data={'datadog_checks.kubelet': ['conf.yaml.default']},
     include_package_data=True,
 )
