@@ -371,11 +371,15 @@ class VSphereCheck(AgentCheck):
                         instance_tags += _get_parent_tags(c)
 
                     vsphere_type = None
+                    entity_type = ''
+                    entity_id = ''
                     if isinstance(c, vim.VirtualMachine):
                         vsphere_type = u'vsphere_type:vm'
                         if c.runtime.powerState == vim.VirtualMachinePowerState.poweredOff:
                             continue
                         host = c.runtime.host.name
+                        entity_id = c.config.instanceUuid
+                        entity_type = 'vm'
                         instance_tags.append(u'vsphere_host:{}'.format(host))
                     elif isinstance(c, vim.HostSystem):
                         vsphere_type = u'vsphere_type:host'
@@ -389,7 +393,12 @@ class VSphereCheck(AgentCheck):
 
                     if vsphere_type:
                         instance_tags.append(vsphere_type)
-                    obj_list.append(dict(mor_type=vimtype, mor=c, hostname=hostname, tags=tags+instance_tags))
+                    obj_dict = dict(mor_type=vimtype, mor=c, hostname=hostname, tags=tags+instance_tags)
+                    if entity_type:
+                        obj_dict.update(entity_type=entity_type)
+                    if entity_id:
+                        obj_dict.update(entity_id=entity_id)
+                    obj_list.append(obj_dict)
 
             return obj_list
 
