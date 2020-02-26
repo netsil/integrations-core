@@ -662,13 +662,20 @@ class VSphereCheck(AgentCheck):
                 if not mor['hostname']:  # no host tags available
                     tags.extend(mor['tags'])
 
+                if custom_tags:
+                    tags.extend(custom_tags)
+
+                #add the entity id and type to tags
+                tags.append(mor['entity_id'])
+                tags.append(mor['entity_type'])
+
                 # vsphere "rates" should be submitted as gauges (rate is
                 # precomputed).
                 self.gauge(
                     "vsphere.%s" % metric_name,
                     value,
                     hostname=mor['hostname'],
-                    tags=['instance:%s' % instance_name] + custom_tags
+                    tags=tags
                 )
 
         # ## <TEST-INSTRUMENTATION>
