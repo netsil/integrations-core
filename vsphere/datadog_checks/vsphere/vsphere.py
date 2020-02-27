@@ -753,8 +753,16 @@ class VSphereCheck(AgentCheck):
                     tags.extend(custom_tags)
 
                 #add the entity id and type to tags
-                tags.append(mor['entity_id'])
-                tags.append(mor['entity_type'])
+                entity_tags = []
+                entity_id = mor.get('entity_id',None)
+                entity_type = mor.get('entity_type',None)
+                if entity_id:
+                    entity_tags.append('entity_id:%s' %entity_id)
+                if entity_type:
+                    entity_tags.append('entity_type:%s' %entity_type)
+
+                if entity_tags:
+                    tags.extend(entity_tags)
 
                 # vsphere "rates" should be submitted as gauges (rate is
                 # precomputed).
