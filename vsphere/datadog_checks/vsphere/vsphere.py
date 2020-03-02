@@ -343,9 +343,10 @@ class VSphereCheck(AgentCheck):
         def _get_parent_tags(mor,all_mors):
             properties = all_mors.get(mor, {})
             parent = properties.get('parent')
-            if parent:
+            parent_mor = all_mors.get(parent, {})
+            if parent and parent_mor:
                 tags = []
-                parent_name = all_mors.get(parent, {}).get('name', 'unknown')
+                parent_name = parent_mor.get('name', 'unknown')
                 if isinstance(parent, vim.HostSystem):
                     tags.append(u'vsphere_host:{}'.format(parent_name))
                 elif isinstance(parent, vim.Folder):
