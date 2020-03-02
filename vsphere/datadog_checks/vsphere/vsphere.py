@@ -358,13 +358,13 @@ class VSphereCheck(AgentCheck):
                 elif isinstance(parent, vim.Datacenter):
                     tags.append(u'vsphere_datacenter:{}'.format(parent_name))
 
-                parent_tags = self._get_parent_tags(parent, all_mors)
+                parent_tags = _get_parent_tags(parent, all_mors)
                 parent_tags.extend(tags)
                 return parent_tags
 
             return []
 
-        def _collect_mors_and_attributes(self, server_instance):
+        def _collect_mors_and_attributes(server_instance):
             resources = list()
             for resource_type in RESOURCE_TYPE_MAP.values():
                 resources.append(resource_type)
@@ -441,13 +441,13 @@ class VSphereCheck(AgentCheck):
             obj_list = defaultdict(list)
 
             # Collect mors and their required attributes
-            all_mors = self._collect_mors_and_attributes(server_instance)
+            all_mors = _collect_mors_and_attributes(server_instance)
             for mor, properties in all_mors.items():
                 instance_tags = []
                 if not self._is_excluded(mor, properties, regexes, include_only_marked):
                     hostname = properties.get("name", "unknown")
                     if properties.get("parent"):
-                        instance_tags.extend(self._get_parent_tags(mor, all_mors))
+                        instance_tags.extend(_get_parent_tags(mor, all_mors))
 
                     vsphere_type = None
                     entity_type = None
