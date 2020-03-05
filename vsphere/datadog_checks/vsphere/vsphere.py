@@ -398,6 +398,9 @@ class VSphereCheck(AgentCheck):
                     property_spec.pathSet.append("runtime.powerState")
                     property_spec.pathSet.append("runtime.host")
                     property_spec.pathSet.append("config.instanceUuid")
+                elif resource == vim.HostSystem:
+                    property_spec.pathSet.append("summary.hardware.uuid")
+
                 property_specs.append(property_spec)
 
             # Create our filter spec from the above specs
@@ -473,6 +476,8 @@ class VSphereCheck(AgentCheck):
                     elif isinstance(mor, vim.HostSystem):
                         vsphere_type = u'vsphere_type:host'
                         mor_type = "host"
+                        entity_type = "node"
+                        entity_id = properties.get("summary.hardware.uuid","")
                     elif isinstance(mor, vim.Datastore):
                         vsphere_type = u'vsphere_type:datastore'
                         instance_tags.append(u'vsphere_datastore:{}'.format(properties.get("name", "unknown")))
