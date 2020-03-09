@@ -55,6 +55,9 @@ RESOURCE_TYPE_MAP = {
     'datastore': vim.Datastore
 }
 
+RESOURCE_TYPE_METRICS = (vim.VirtualMachine, vim.HostSystem, vim.Datacenter, vim.Datastore)
+RESOURCE_TYPE_NO_METRIC = (vim.ComputeResource, vim.Folder)
+
 # Time after which we reap the jobs that clog the queue
 # TODO: use it
 JOB_TIMEOUT = 10
@@ -369,6 +372,9 @@ class VSphereCheck(AgentCheck):
             for resource_type in RESOURCE_TYPE_MAP.values():
                 resources.append(resource_type)
 
+            #add the non metric types for parents info
+            resources.extend(RESOURCE_TYPE_NO_METRIC)
+
             content = server_instance.content
             view_ref = content.viewManager.CreateContainerView(content.rootFolder, resources, True)
 
@@ -447,7 +453,7 @@ class VSphereCheck(AgentCheck):
             all_mors = _collect_mors_and_attributes(server_instance)
             for mor, properties in all_mors.items():
                 instance_tags = []
-                if not self._is_excluded(mor, properties, regexes, include_only_marked):
+                if isinstance(mor, RESOURCE_TYPE_METRICS) and not self._is_excluded(mor, properties, regexes, include_only_marked):
                     hostname = properties.get("name", "unknown")
                     if properties.get("parent"):
                         instance_tags.extend(_get_parent_tags(mor, all_mors))
