@@ -451,6 +451,10 @@ class VSphereCheck(AgentCheck):
 
             # Collect mors and their required attributes
             all_mors = _collect_mors_and_attributes(server_instance)
+            # Add rootFolder since it is not explored by the propertyCollector
+            root_mor = server_instance.content.rootFolder
+            all_mors[root_mor] = {"name": root_mor.name, "parent": None}
+
             for mor, properties in all_mors.items():
                 instance_tags = []
                 if isinstance(mor, RESOURCE_TYPE_METRICS) and not self._is_excluded(mor, properties, regexes, include_only_marked):
