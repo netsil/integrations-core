@@ -235,6 +235,43 @@ VIRTUALDISK_METRICS = {
         'entity': ['VirtualMachine']
     },
 }
+NETWORK_METRICS = {
+    # Usage
+    'network.usage': {
+        's_type': 'rate',
+        'unit': 'kiloBytesPerSecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Data receive rate
+    'net.bytesRx': {
+        's_type': 'rate',
+        'unit': 'kiloBytesPerSecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Data transmit rate
+    'net.bytesTx': {
+        's_type': 'rate',
+        'unit': 'kiloBytesPerSecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Receive packets dropped
+    'net.droppedRx': {
+        's_type': 'delta',
+        'unit': 'number',
+        'rollup': 'summation',
+        'entity': ['VirtualMachine']
+    },
+    # Transmit packets dropped
+    'net.droppedTx': {
+        's_type': 'delta',
+        'unit': 'number',
+        'rollup': 'summation',
+        'entity': ['VirtualMachine']
+    },
+}
 
 VSPHERE_METRICS = {}
 VSPHERE_METRICS.update(CPU_METRICS)
@@ -242,3 +279,4 @@ VSPHERE_METRICS.update(MEM_METRICS)
 VSPHERE_METRICS.update(DATASTORE_METRICS)
 VSPHERE_METRICS.update(DISK_METRICS)
 VSPHERE_METRICS.update(VIRTUALDISK_METRICS)
+VSPHERE_METRICS.update(NETWORK_METRICS)
