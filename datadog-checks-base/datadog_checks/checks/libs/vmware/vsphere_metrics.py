@@ -90,6 +90,48 @@ DATASTORE_METRICS = {
         'rollup': 'average',
         'entity': ['VirtualMachine', 'HostSystem']
     },
+    # Storage I/O Control aggregated IOPS
+    'datastore.datastoreIops': {
+        's_type': 'absolute',
+        'unit': 'number',
+        'rollup': 'average',
+        'entity': ['HostSystem']
+    },
+    # Storage DRS datastore read I/O rate
+    'datastore.datastoreReadIops': {
+        's_type': 'absolute',
+        'unit': 'number',
+        'rollup': 'latest',
+        'entity': ['HostSystem']
+    },
+    # Storage DRS datastore write I/O rate
+    'datastore.datastoreWriteIops': {
+        's_type': 'absolute',
+        'unit': 'number',
+        'rollup': 'latest',
+        'entity': ['HostSystem']
+    },
+    # Read latency
+    'datastore.totalReadLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine', 'HostSystem']
+    },
+    # Write latency
+    'datastore.totalWriteLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine', 'HostSystem']
+    },
+    # Highest latency
+    'datastore.maxTotalLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'latest',
+        'entity': ['VirtualMachine', 'HostSystem']
+    },
 }
 DISK_METRICS = {
     # Usage
@@ -99,25 +141,11 @@ DISK_METRICS = {
         'rollup': 'average',
         'entity': ['VirtualMachine', 'HostSystem']
     },
-    # Read requests
-    'disk.numberRead': {
-        's_type': 'delta',
-        'unit': 'number',
-        'rollup': 'summation',
-        'entity': ['VirtualMachine', 'HostSystem']
-    },
     # Average read requests per second
     'disk.numberReadAveraged': {
         's_type': 'rate',
         'unit': 'number',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
-    },
-    # Write requests
-    'disk.numberWrite': {
-        's_type': 'delta',
-        'unit': 'number',
-        'rollup': 'summation',
         'entity': ['VirtualMachine', 'HostSystem']
     },
     # Average write requests per second
@@ -141,4 +169,76 @@ DISK_METRICS = {
         'rollup': 'average',
         'entity': ['VirtualMachine', 'HostSystem']
     },
+    # Highest latency
+    'disk.maxTotalLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'latest',
+        'entity': ['VirtualMachine', 'HostSystem']
+    },
+    # Read latency
+    'disk.totalReadLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'average',
+        'entity': ['HostSystem']
+    },
+    # Write latency
+    'disk.totalWriteLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'average',
+        'entity': ['HostSystem']
+    },
 }
+VIRTUALDISK_METRICS = {
+    # Average read requests per second
+    'virtualDisk.numberReadAveraged': {
+        's_type': 'rate',
+        'unit': 'number',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Average write requests per second
+    'virtualDisk.numberWriteAveraged': {
+        's_type': 'rate',
+        'unit': 'number',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Read rate
+    'virtualDisk.read': {
+        's_type': 'rate',
+        'unit': 'kiloBytesPerSecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Write rate
+    'virtualDisk.write': {
+        's_type': 'rate',
+        'unit': 'kiloBytesPerSecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Read latency
+    'virtualDisk.totalReadLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+    # Write latency
+    'virtualDisk.totalWriteLatency': {
+        's_type': 'absolute',
+        'unit': 'millisecond',
+        'rollup': 'average',
+        'entity': ['VirtualMachine']
+    },
+}
+
+VSPHERE_METRICS = {}
+VSPHERE_METRICS.update(CPU_METRICS)
+VSPHERE_METRICS.update(MEM_METRICS)
+VSPHERE_METRICS.update(DATASTORE_METRICS)
+VSPHERE_METRICS.update(DISK_METRICS)
+VSPHERE_METRICS.update(VIRTUALDISK_METRICS)
