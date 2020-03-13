@@ -18,6 +18,7 @@ from datadog_checks.config import _is_affirmative
 from datadog_checks.checks import AgentCheck
 from datadog_checks.checks.libs.vmware.basic_metrics import BASIC_METRICS
 from datadog_checks.checks.libs.vmware.all_metrics import ALL_METRICS
+from datadog_checks.checks.libs.vmware.vsphere_metrics import VSPHERE_METRICS
 from datadog_checks.checks.libs.thread_pool import Pool
 from datadog_checks.checks.libs.timer import Timer
 from .common import SOURCE_TYPE
@@ -286,7 +287,7 @@ class VSphereCheck(AgentCheck):
             if (i_key not in self.metrics_metadata
                     or metric.counterId not in self.metrics_metadata[i_key]):
                 continue
-            if self.metrics_metadata[i_key][metric.counterId]['name'] in BASIC_METRICS:
+            if self.metrics_metadata[i_key][metric.counterId]['name'] in VSPHERE_METRICS:
                 wanted_metrics.append(metric)
 
         return wanted_metrics
