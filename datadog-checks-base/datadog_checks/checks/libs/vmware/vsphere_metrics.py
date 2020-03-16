@@ -237,7 +237,7 @@ VIRTUALDISK_METRICS = {
 }
 NETWORK_METRICS = {
     # Usage
-    'network.usage': {
+    'net.usage': {
         's_type': 'rate',
         'unit': 'kiloBytesPerSecond',
         'rollup': 'average',
