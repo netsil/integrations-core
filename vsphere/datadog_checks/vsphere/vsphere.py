@@ -407,6 +407,8 @@ class VSphereCheck(AgentCheck):
                     property_spec.pathSet.append("config.instanceUuid")
                 elif resource == vim.HostSystem:
                     property_spec.pathSet.append("summary.hardware.uuid")
+                elif resource == vim.Datastore:
+                    property_spec.pathSet.append("summary.url")
 
                 property_specs.append(property_spec)
 
@@ -494,6 +496,8 @@ class VSphereCheck(AgentCheck):
                         instance_tags.append(u'vsphere_datastore:{}'.format(properties.get("name", "unknown")))
                         hostname = None
                         mor_type = "datastore"
+                        entity_type = "container"
+                        entity_id = properties.get("summary.url","")
                     elif isinstance(mor, vim.Datacenter):
                         vsphere_type = u'vsphere_type:datacenter'
                         instance_tags.append(u'vsphere_datacenter:{}'.format(properties.get("name", "unknown")))

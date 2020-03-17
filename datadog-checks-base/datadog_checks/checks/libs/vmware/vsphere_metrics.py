@@ -67,28 +67,28 @@ DATASTORE_METRICS = {
         's_type': 'rate',
         'unit': 'number',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     # Average write requests per second
     'datastore.numberWriteAveraged': {
         's_type': 'rate',
         'unit': 'number',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     # Read rate
     'datastore.read': {
         's_type': 'rate',
         'unit': 'kiloBytesPerSecond',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     #Write rate
     'datastore.write': {
         's_type': 'rate',
         'unit': 'kiloBytesPerSecond',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     # Storage I/O Control aggregated IOPS
     'datastore.datastoreIops': {
@@ -132,6 +132,13 @@ DATASTORE_METRICS = {
         'rollup': 'latest',
         'entity': ['VirtualMachine', 'HostSystem']
     },
+    # Datastore Command Aborts
+    'datastore.commandsAborted': {
+        's_type': 'absolute',
+        'unit': 'number',
+        'rollup': 'summation',
+        'entity': ['Datastore']
+    },
 }
 DISK_METRICS = {
     # Usage
@@ -141,33 +148,40 @@ DISK_METRICS = {
         'rollup': 'average',
         'entity': ['VirtualMachine', 'HostSystem']
     },
+    # Storage Capacity Usage
+    'disk.capacity.usage': {
+        's_type': 'absolute',
+        'unit': 'kiloBytes',
+        'rollup': 'average',
+        'entity': ['Datastore']
+    },
     # Average read requests per second
     'disk.numberReadAveraged': {
         's_type': 'rate',
         'unit': 'number',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     # Average write requests per second
     'disk.numberWriteAveraged': {
         's_type': 'rate',
         'unit': 'number',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     # Read rate
     'disk.read': {
         's_type': 'rate',
         'unit': 'kiloBytesPerSecond',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     # Write rate
     'disk.write': {
         's_type': 'rate',
         'unit': 'kiloBytesPerSecond',
         'rollup': 'average',
-        'entity': ['VirtualMachine', 'HostSystem']
+        'entity': ['VirtualMachine', 'HostSystem', 'Datastore']
     },
     # Highest latency
     'disk.maxTotalLatency': {
