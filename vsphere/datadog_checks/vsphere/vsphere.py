@@ -9,6 +9,7 @@ import ssl
 import time
 import traceback
 from collections import defaultdict
+from datetime import datetime
 
 from pyVim import connect
 from pyVmomi import vim  # pylint: disable=E0611
@@ -737,12 +738,19 @@ class VSphereCheck(AgentCheck):
         perfManager = server_instance.content.perfManager
         custom_tags = instance.get('tags', [])
 
-        query = vim.PerformanceManager.QuerySpec(maxSample=1,
-                                                 entity=mor['mor'],
-                                                 metricId=mor['metrics'],
-                                                 intervalId=mor['interval'],
-                                                 format='normal')
-        results = perfManager.QueryPerf(querySpec=[query])
+        query_spec = vim.PerformanceManager.QuerySpec()
+        query_spec.entity = mor['mor']
+        query_spec.metricId = mor['metrics']
+        query_spec.format = "normal"
+        query_spec.intervalId = mor['interval']
+        if mor['mor_type'] in REALTIME_RESOURCES:
+            query_spec.maxSample = 1  # Request a single datapoint
+        else:
+            # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
+            # contain at least one element
+            query_spec.startTime = datetime.now() - timedelta(hours=2)
+
+        results = perfManager.QueryPerf(querySpec=[query_spec])
         if results:
             for result in results[0].value:
                 if result.id.counterId not in self.metrics_metadata[i_key]:
