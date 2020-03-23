@@ -148,11 +148,25 @@ DISK_METRICS = {
         'rollup': 'average',
         'entity': ['VirtualMachine', 'HostSystem']
     },
-    # Storage Capacity Usage
-    'disk.capacity.usage': {
+    # Storage Capacity
+    'disk.capacity': {
         's_type': 'absolute',
         'unit': 'kiloBytes',
-        'rollup': 'average',
+        'rollup': 'latest',
+        'entity': ['Datastore']
+    },
+    # Storage used
+    'disk.used': {
+        's_type': 'absolute',
+        'unit': 'kiloBytes',
+        'rollup': 'latest',
+        'entity': ['Datastore']
+    },
+    # Storage provisioned
+    'disk.provisioned': {
+        's_type': 'absolute',
+        'unit': 'kiloBytes',
+        'rollup': 'latest',
         'entity': ['Datastore']
     },
     # Average read requests per second

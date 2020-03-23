@@ -282,15 +282,19 @@ class VSphereCheck(AgentCheck):
 
         i_key = self._instance_key(instance)
         wanted_metrics = []
+        aggregate_counters = {}
         # Get only the basic metrics
         for metric in available_metrics:
             # No cache yet, skip it for now
             if (i_key not in self.metrics_metadata
                     or metric.counterId not in self.metrics_metadata[i_key]):
                 continue
-            if self.metrics_metadata[i_key][metric.counterId]['name'] in VSPHERE_METRICS:
-                wanted_metrics.append(metric)
+            if (self.metrics_metadata[i_key][metric.counterId]['name'] in VSPHERE_METRICS
+                                                    and metric.counterId not in aggregate_counters):
+                aggregate_counters[metric.counterId] = vim.PerformanceManager.MetricId(counterId=metric.counterId, instance="")
 
+        for counter in aggregate_counters.values():
+            wanted_metrics.append(counter)
         return wanted_metrics
 
     def get_external_host_tags(self):
