@@ -813,6 +813,37 @@ class VSphereCheck(AgentCheck):
         self.histogram('datadog.agent.vsphere.metric_colection.time', t.total(), tags=custom_tags)
         # ## </TEST-INSTRUMENTATION>
 
+    def make_batch(self, mors, resource_type):
+        """Iterates over mors and generate batches with a fixed number of metrics to query.
+        """
+        # Safeguard, let's avoid collecting multiple resources in the same call
+        mors = [m for m in mors if isinstance(m, resource_type)]
+
+        if resource_type in REALTIME_RESOURCES or self.max_historical_metrics < 0:
+            # Queries are not limited by vCenter
+            max_batch_size = self.metrics_per_query
+        else:
+            # Collection is limited by the value of `max_query_metrics`
+            if self.metrics_per_query < 0:
+                max_batch_size = self.max_historical_metrics
+            else:
+                max_batch_size = min(self.metrics_per_query, self.max_historical_metrics)
+
+        batch = defaultdict(list)
+        batch_size = 0
+        for m in mors:
+            metric_ids = m['metrics']
+            for metric in metric_ids:
+                if batch_size == max_batch_size:
+                    yield batch
+                    batch = defaultdict(list)
+                    batch_size = 0
+                batch[m].append(metric)
+                batch_size += 1
+        # Do not yield an empty batch
+        if batch:
+            yield batch
+
     def collect_metrics(self, instance):
         """ Calls asynchronously _collect_metrics_atomic on all MORs, as the
         job queue is processed the Aggregator will receive the metrics.
