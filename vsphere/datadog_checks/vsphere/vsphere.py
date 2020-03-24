@@ -48,17 +48,21 @@ BATCH_MORLIST_SIZE = 50
 # is significantly lower than the size of the queryPerf response, so allow specifying a different value.
 BATCH_COLLECTOR_SIZE = 500
 
+DEFAULT_METRICS_PER_QUERY = 500
+DEFAULT_MAX_QUERY_METRICS = 256
+# the vcenter maxquerymetrics option
+MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
+
 REALTIME_RESOURCES = {'vm', 'host'}
 
 RESOURCE_TYPE_MAP = {
     'vm': vim.VirtualMachine,
-    'datacenter': vim.Datacenter,
     'host': vim.HostSystem,
     'datastore': vim.Datastore
 }
 
-RESOURCE_TYPE_METRICS = (vim.VirtualMachine, vim.HostSystem, vim.Datacenter, vim.Datastore)
-RESOURCE_TYPE_NO_METRIC = (vim.ComputeResource, vim.Folder)
+RESOURCE_TYPE_METRICS = (vim.VirtualMachine, vim.HostSystem, vim.Datastore)
+RESOURCE_TYPE_NO_METRIC = (vim.ComputeResource, vim.Folder,vim.Datacenter)
 
 # Time after which we reap the jobs that clog the queue
 # TODO: use it
@@ -107,6 +111,10 @@ class VSphereCheck(AgentCheck):
         self.event_config = {}
         # Batch size for property collector
         self.batch_collector_size = init_config.get("batch_property_collector_size", BATCH_COLLECTOR_SIZE)
+
+        # Metrics Query size
+        self.max_historical_metrics = init_config.get("max_historical_metrics", DEFAULT_MAX_QUERY_METRICS)
+        self.metrics_per_query = init_config.get("metrics_per_query", DEFAULT_METRICS_PER_QUERY)
 
         # Caching resources, timeouts
         self.cache_times = {}
@@ -503,11 +511,6 @@ class VSphereCheck(AgentCheck):
                         mor_type = "datastore"
                         entity_type = "container"
                         entity_id = properties.get("summary.url","")
-                    elif isinstance(mor, vim.Datacenter):
-                        vsphere_type = u'vsphere_type:datacenter'
-                        instance_tags.append(u'vsphere_datacenter:{}'.format(properties.get("name", "unknown")))
-                        hostname = None
-                        mor_type = "datacenter"
 
                     if mor_type:
                         if vsphere_type:
@@ -820,13 +823,12 @@ class VSphereCheck(AgentCheck):
             return
 
         mors = self.morlist[i_key].items()
-        self.log.debug("Collecting metrics of %d mors" % len(mors))
-
+        n_mors = len(mors)
+        self.log.debug("Collecting metrics of %d mors" % n_mors)
         vm_count = 0
-
         custom_tags = instance.get('tags', [])
 
-        for mor_name, mor in mors:
+        for _, mor in mors:
             if mor['mor_type'] == 'vm':
                 vm_count += 1
             if 'metrics' not in mor or not mor['metrics']:
@@ -841,6 +843,21 @@ class VSphereCheck(AgentCheck):
             self.start_pool()
 
         custom_tags = instance.get('tags', [])
+
+        # Update the value of `max_query_metrics` if needed
+        server_instance = self._get_server_instance(instance)
+        try:
+            vcenter_settings = server_instance.content.setting.QueryOptions(MAX_QUERY_METRICS_OPTION)
+            vcenter_max_hist_metrics = int(vcenter_settings[0].value)
+            if vcenter_max_hist_metrics < 0:
+                self.max_historical_metrics = float('inf')
+            else:
+                self.max_historical_metrics = vcenter_max_hist_metrics
+        except Exception:
+            self.max_historical_metrics = DEFAULT_MAX_QUERY_METRICS
+            self.log.info("Could not fetch the value of %s, setting `max_historical_metrics` to default value %d.",
+                                                                MAX_QUERY_METRICS_OPTION,DEFAULT_MAX_QUERY_METRICS)
+            pass
 
         # ## <TEST-INSTRUMENTATION>
         self.gauge('datadog.agent.vsphere.queue_size', self.pool._workq.qsize(), tags=['instant:initial'] + custom_tags)
