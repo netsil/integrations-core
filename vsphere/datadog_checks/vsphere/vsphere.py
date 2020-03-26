@@ -733,8 +733,8 @@ class VSphereCheck(AgentCheck):
         return value
 
     @atomic_method
-    def _collect_metrics_atomic(self, instance, mor):
-        """ Task that collects the metrics listed in the morlist for one MOR
+    def _collect_metrics_atomic(self, instance, query_specs):
+        """ Task that collects the metrics listed in the batch of query specs
         """
         # ## <TEST-INSTRUMENTATION>
         t = Timer()
@@ -744,70 +744,71 @@ class VSphereCheck(AgentCheck):
         server_instance = self._get_server_instance(instance)
         perfManager = server_instance.content.perfManager
         custom_tags = instance.get('tags', [])
-
-        query_spec = vim.PerformanceManager.QuerySpec()
-        query_spec.entity = mor['mor']
-        query_spec.metricId = mor['metrics']
-        query_spec.format = "normal"
-        query_spec.intervalId = mor['interval']
-        if mor['mor_type'] in REALTIME_RESOURCES:
-            query_spec.maxSample = 1  # Request a single datapoint
-        else:
-            # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
-            # contain at least one element
-            query_spec.startTime = datetime.now() - timedelta(hours=2)
-
-        results = perfManager.QueryPerf(querySpec=[query_spec])
+        results = perfManager.QueryPerf(querySpec=query_specs)
         if results:
-            for result in results[0].value:
-                if result.id.counterId not in self.metrics_metadata[i_key]:
-                    self.log.debug("Skipping this metric value, because there is no metadata about it")
-                    continue
-
-                # Metric types are absolute, delta, and rate
+            for entity_metrics in results:
+                mor_name = str(entity_metrics.entity)
                 try:
-                    metric_name = self.metrics_metadata[i_key][result.id.counterId]['name']
+                    mor = self.morlist[i_key][mor_name]
                 except KeyError:
-                    metric_name = None
-
-                if metric_name not in ALL_METRICS:
-                    self.log.debug(u"Skipping unknown `%s` metric.", metric_name)
+                    self.log.error("Trying to get metrics from object %s deleted from the cache, skipping.",mor_name)
                     continue
 
-                if not result.value:
-                    self.log.debug(u"Skipping `%s` metric because the value is empty", metric_name)
-                    continue
+                for perf_metric in entity_metrics.value:
+                    counter_id = perf_metric.id.counterId
+                    if counter_id not in self.metrics_metadata[i_key]:
+                        self.log.debug("Skipping this metric value %d, because there is no metadata about it",counter_id)
+                        continue
 
-                instance_name = result.id.instance or "none"
-                value = self._transform_value(instance, result.id.counterId, result.value[0])
+                    # Metric types are absolute, delta, and rate
+                    try:
+                        metric_name = self.metrics_metadata[i_key][counter_id]['name']
+                    except KeyError:
+                        metric_name = None
 
-                tags = ['instance:%s' % instance_name]
-                if not mor['hostname']:  # no host tags available
-                    tags.extend(mor['tags'])
+                    if metric_name not in ALL_METRICS:
+                        self.log.debug(u"Skipping unknown `%s` metric.", metric_name)
+                        continue
 
-                if custom_tags:
-                    tags.extend(custom_tags)
+                    if not perf_metric.value:
+                        self.log.debug(u"Skipping `%s` metric because the value is empty", metric_name)
+                        continue
 
-                #add the entity id and type to tags
-                entity_tags = []
-                entity_id = mor.get('entity_id',None)
-                entity_type = mor.get('entity_type',None)
-                if entity_id:
-                    entity_tags.append('entity_id:%s' %entity_id)
-                if entity_type:
-                    entity_tags.append('entity_type:%s' %entity_type)
+                    instance_name = perf_metric.id.instance or "none"
+                    # Get the most recent value that isn't negative
+                    valid_values = [v for v in perf_metric.value if v >= 0]
+                    if not valid_values:
+                        continue
 
-                if entity_tags:
-                    tags.extend(entity_tags)
+                    value = self._transform_value(instance, counter_id, valid_values[-1])
 
-                # vsphere "rates" should be submitted as gauges (rate is
-                # precomputed).
-                self.gauge(
-                    "vsphere.%s" % metric_name,
-                    value,
-                    hostname=mor['hostname'],
-                    tags=tags
-                )
+                    tags = ['instance:%s' % instance_name]
+                    if not mor['hostname']:  # no host tags available
+                        tags.extend(mor['tags'])
+
+                    if custom_tags:
+                        tags.extend(custom_tags)
+
+                    #add the entity id and type to tags
+                    entity_tags = []
+                    entity_id = mor.get('entity_id',None)
+                    entity_type = mor.get('entity_type',None)
+                    if entity_id:
+                        entity_tags.append('entity_id:%s' %entity_id)
+                    if entity_type:
+                        entity_tags.append('entity_type:%s' %entity_type)
+
+                    if entity_tags:
+                        tags.extend(entity_tags)
+
+                    # vsphere "rates" should be submitted as gauges (rate is
+                    # precomputed).
+                    self.gauge(
+                        "vsphere.%s" % metric_name,
+                        value,
+                        hostname=mor['hostname'],
+                        tags=tags
+                    )
 
         # ## <TEST-INSTRUMENTATION>
         self.histogram('datadog.agent.vsphere.metric_colection.time', t.total(), tags=custom_tags)
@@ -889,18 +890,10 @@ class VSphereCheck(AgentCheck):
         mors = self.morlist[i_key].items()
         n_mors = len(mors)
         self.log.debug("Collecting metrics of %d mors" % n_mors)
-        vm_count = 0
-        custom_tags = instance.get('tags', [])
 
-        for _, mor in mors:
-            if mor['mor_type'] == 'vm':
-                vm_count += 1
-            if 'metrics' not in mor or not mor['metrics']:
-                continue
-
-            self.pool.apply_async(self._collect_metrics_atomic, args=(instance, mor))
-
-        self.gauge('vsphere.vm.count', vm_count, tags=["vcenter_server:%s" % instance.get('name')] + custom_tags)
+        for query_specs in self.make_query_specs(mors):
+            if query_specs:
+                self.pool.apply_async(self._collect_metrics_atomic, args=(instance, query_specs))
 
     def check(self, instance):
         if not self.pool_started:
