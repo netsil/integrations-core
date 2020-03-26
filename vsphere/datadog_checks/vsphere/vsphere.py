@@ -817,8 +817,14 @@ class VSphereCheck(AgentCheck):
         """Iterates over mors and generate batches with a fixed number of metrics to query.
         """
         # Safeguard, let's avoid collecting multiple resources in the same call
-        mors = [m for m in mors if isinstance(m, resource_type)]
+        # get entire list of mors with matching resource_type
+        mor_resources = []
+        for mor in mors:
+            mor_obj = mor['mor']
+            if isinstance(mor_obj, resource_type):
+                mor_resources.append(mor)
 
+        # generate batch size based on resource type
         if resource_type in REALTIME_RESOURCES or self.max_historical_metrics < 0:
             # Queries are not limited by vCenter
             max_batch_size = self.metrics_per_query
@@ -831,18 +837,45 @@ class VSphereCheck(AgentCheck):
 
         batch = defaultdict(list)
         batch_size = 0
-        for m in mors:
-            metric_ids = m['metrics']
+        for mor in mor_resources:
+            mor_obj = mor['mor']
+            metric_ids = mor['metrics']
             for metric in metric_ids:
                 if batch_size == max_batch_size:
                     yield batch
                     batch = defaultdict(list)
                     batch_size = 0
-                batch[m].append(metric)
+                batch[mor_obj].append(metric)
                 batch_size += 1
         # Do not yield an empty batch
         if batch:
             yield batch
+
+    def make_query_specs(self,mors):
+        """
+        Build query specs using MORs and metrics metadata.
+        :returns a list of vim.PerformanceManager.QuerySpec:
+        https://www.vmware.com/support/developer/vc-sdk/visdk41pubs/ApiReference/vim.PerformanceManager.QuerySpec.html
+        """
+        for resource_type in RESOURCE_TYPE_MAP.values():
+            for batch in self.make_batch(mors, resource_type):
+                query_specs = []
+                for mor, metrics in batch.items():
+                    query_spec = vim.PerformanceManager.QuerySpec()
+                    query_spec.entity = mor
+                    query_spec.metricId = metrics
+                    query_spec.format = "normal"
+                    if resource_type in REALTIME_RESOURCES:
+                        query_spec.intervalId = REAL_TIME_INTERVAL
+                        query_spec.maxSample = 1  # Request a single datapoint
+                    else:
+                        # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
+                        # contain at least one element
+                        query_spec.startTime = datetime.now() - timedelta(hours=2)
+
+                    query_specs.append(query_spec)
+                if query_specs:
+                    yield query_specs
 
     def collect_metrics(self, instance):
         """ Calls asynchronously _collect_metrics_atomic on all MORs, as the
