@@ -596,7 +596,6 @@ class VSphereCheck(AgentCheck):
             if resource_type not in self.morlist[i_key]:
                 self.morlist[i_key][resource_type] = {}
             for mor in mors:
-                #mor['metrics'] = self.metric_ids[i_key]
                 mor_name = str(mor['mor'])
                 self.morlist[i_key][resource_type][mor_name] = mor
                 #update timestamp
@@ -643,6 +642,7 @@ class VSphereCheck(AgentCheck):
 
         self.cache_times[i_key][METRICS_METADATA][LAST] = time.time()
 
+        self.log.debug("Collected %d counters metadata in %.3f seconds.", len(counters), t.total())
         self.log.info("Finished metadata collection for instance {0}".format(i_key))
         # Reset metadata
         self.metrics_metadata[i_key] = new_metadata
@@ -676,71 +676,74 @@ class VSphereCheck(AgentCheck):
         server_instance = self._get_server_instance(instance)
         perfManager = server_instance.content.perfManager
         custom_tags = instance.get('tags', [])
-        self.log.info("_collect_metrics_atomic for %d queries",len(query_specs))
-        results = perfManager.QueryPerf(querySpec=query_specs)
-        if results:
-            for entity_metrics in results:
-                mor_name = str(entity_metrics.entity)
-                mor_type = type(entity_metrics.entity)
-                try:
-                    mor = self.morlist[i_key][mor_type][mor_name]
-                except KeyError:
-                    self.log.error("Trying to get metrics from object %s deleted from the cache, skipping.",mor_name)
-                    continue
-
-                for perf_metric in entity_metrics.value:
-                    counter_id = perf_metric.id.counterId
-                    if counter_id not in self.metrics_metadata[i_key][mor_type]:
-                        self.log.debug("Skipping this metric value %d, because there is no metadata about it",counter_id)
-                        continue
-
-                    # Metric types are absolute, delta, and rate
+        try:
+            results = perfManager.QueryPerf(querySpec=query_specs)
+            if results:
+                for entity_metrics in results:
+                    mor_name = str(entity_metrics.entity)
+                    mor_type = type(entity_metrics.entity)
                     try:
-                        metric_name = self.metrics_metadata[i_key][mor_type][counter_id]['name']
+                        mor = self.morlist[i_key][mor_type][mor_name]
                     except KeyError:
-                        metric_name = None
-
-                    if not perf_metric.value:
-                        self.log.debug(u"Skipping `%s` metric because the value is empty", metric_name)
+                        self.log.error("Trying to get metrics from object %s deleted from the cache, skipping.",mor_name)
                         continue
 
-                    instance_name = perf_metric.id.instance or "none"
-                    # Get the most recent value that isn't negative
-                    valid_values = [v for v in perf_metric.value if v >= 0]
-                    if not valid_values:
-                        continue
+                    for perf_metric in entity_metrics.value:
+                        counter_id = perf_metric.id.counterId
+                        if counter_id not in self.metrics_metadata[i_key][mor_type]:
+                            self.log.debug("Skipping this metric value %d, because there is no metadata about it",counter_id)
+                            continue
 
-                    value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
+                        # Metric types are absolute, delta, and rate
+                        try:
+                            metric_name = self.metrics_metadata[i_key][mor_type][counter_id]['name']
+                        except KeyError:
+                            metric_name = None
 
-                    tags = ['instance:%s' % instance_name]
-                    if not mor['hostname']:  # no host tags available
-                        tags.extend(mor['tags'])
+                        if not perf_metric.value:
+                            self.log.debug(u"Skipping `%s` metric because the value is empty", metric_name)
+                            continue
 
-                    if custom_tags:
-                        tags.extend(custom_tags)
+                        instance_name = perf_metric.id.instance or "none"
+                        # Get the most recent value that isn't negative
+                        valid_values = [v for v in perf_metric.value if v >= 0]
+                        if not valid_values:
+                            continue
 
-                    #add the entity id and type to tags
-                    entity_tags = []
-                    entity_id = mor.get('entity_id',None)
-                    entity_type = mor.get('entity_type',None)
-                    if entity_id:
-                        entity_tags.append('entity_id:%s' %entity_id)
-                    if entity_type:
-                        entity_tags.append('entity_type:%s' %entity_type)
+                        value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
 
-                    if entity_tags:
-                        tags.extend(entity_tags)
+                        tags = ['instance:%s' % instance_name]
+                        if not mor['hostname']:  # no host tags available
+                            tags.extend(mor['tags'])
 
-                    self.log.info("query results for %s : %f tags : %s",metric_name,value,tags)
+                        if custom_tags:
+                            tags.extend(custom_tags)
 
-                    # vsphere "rates" should be submitted as gauges (rate is
-                    # precomputed).
-                    self.gauge(
-                        "vsphere.%s" % metric_name,
-                        value,
-                        hostname=mor['hostname'],
-                        tags=tags
-                    )
+                        #add the entity id and type to tags
+                        entity_tags = []
+                        entity_id = mor.get('entity_id',None)
+                        entity_type = mor.get('entity_type',None)
+                        if entity_id:
+                            entity_tags.append('entity_id:%s' %entity_id)
+                        if entity_type:
+                            entity_tags.append('entity_type:%s' %entity_type)
+
+                        if entity_tags:
+                            tags.extend(entity_tags)
+
+                        self.log.debug("query results for %s : %f tags : %s",metric_name,value,tags)
+
+                        # vsphere "rates" should be submitted as gauges (rate is
+                        # precomputed).
+                        self.gauge(
+                            "vsphere.%s" % metric_name,
+                            value,
+                            hostname=mor['hostname'],
+                            tags=tags
+                        )
+        except Exception:
+            self.log.warning("Could not query perf metrics.")
+            pass
 
         # ## <TEST-INSTRUMENTATION>
         self.histogram('datadog.agent.vsphere.metric_colection.time', t.total(), tags=custom_tags)
@@ -793,7 +796,7 @@ class VSphereCheck(AgentCheck):
             # Safeguard, let's avoid collecting multiple resource types in the same call
             # get entire list of mors with matching resource_type
             mors = self.morlist[i_key].get(resource_type,{}).values()
-            self.log.info("make query specs for %d mors of type %s",len(mors),resource_type)
+            self.log.debug("make query specs for %d mors of type %s",len(mors),resource_type)
             max_batch_size = self.get_batch_size(resource_type)
             counters = self.metrics_metadata[i_key].get(resource_type,{})
             # - An asterisk (*) to specify all instances of the metric for the specified counterId
@@ -808,7 +811,6 @@ class VSphereCheck(AgentCheck):
 
             for batch in self.make_batch(mors, metric_ids, max_batch_size):
                 query_specs = []
-                self.log.info("make batch of %d mors",len(batch))
                 for mor, metrics in batch.items():
                     query_spec = vim.PerformanceManager.QuerySpec()
                     query_spec.entity = mor
@@ -840,7 +842,7 @@ class VSphereCheck(AgentCheck):
             mors = self.morlist[i_key].get(resource_type,{})
             n_mors += len(mors)
 
-        self.log.info("Collecting metrics of %d mors" % n_mors)
+        self.log.debug("Collecting metrics of %d mors" % n_mors)
 
         for query_specs in self.make_query_specs(instance):
             if query_specs:
@@ -863,7 +865,7 @@ class VSphereCheck(AgentCheck):
                 self.max_historical_metrics = vcenter_max_hist_metrics
         except Exception:
             self.max_historical_metrics = DEFAULT_MAX_QUERY_METRICS
-            self.log.info("Could not fetch the value of %s, setting `max_historical_metrics` to default value %d.",
+            self.log.debug("Could not fetch the value of %s, setting `max_historical_metrics` to default value %d.",
                                                                 MAX_QUERY_METRICS_OPTION,DEFAULT_MAX_QUERY_METRICS)
             pass
 
