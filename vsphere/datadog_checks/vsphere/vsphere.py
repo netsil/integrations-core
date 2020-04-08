@@ -55,8 +55,8 @@ DEFAULT_MAX_QUERY_METRICS = 64
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
 
-REALTIME_RESOURCES = [vim.VirtualMachine, vim.HostSystem, vim.ClusterComputeResource]
-HISTORICAL_RESOURCES = [vim.Datastore]
+REALTIME_RESOURCES = [vim.VirtualMachine, vim.HostSystem]
+HISTORICAL_RESOURCES = [vim.Datastore, vim.ClusterComputeResource]
 ALL_RESOURCES_WITH_METRICS = REALTIME_RESOURCES + HISTORICAL_RESOURCES
 ALL_RESOURCES_WITH_NO_METRICS = [vim.ComputeResource, vim.Folder,vim.Datacenter]
 
@@ -115,8 +115,10 @@ class VSphereCheck(AgentCheck):
         self.max_historical_metrics = init_config.get("max_historical_metrics", DEFAULT_MAX_QUERY_METRICS)
         self.metrics_per_query = init_config.get("metrics_per_query", DEFAULT_METRICS_PER_QUERY)
 
-        # Vcenter configuration cluster list
+        # Vcenter configuration cluster name list
         self.cluster_list = {}
+        # cluster mors based on cluster name list to be monitored
+        self.monitor_cluster_mors = {}
 
         # Caching resources, timeouts
         self.cache_times = {}
@@ -369,22 +371,27 @@ class VSphereCheck(AgentCheck):
                 if cluster_name:
                     cluster_mors[cluster_name] = obj.obj
 
-        self.log.info("Completed enumeration of all clusters")
         return cluster_mors
 
     def getClustersToMonitor(self,instance):
         monitor_clusters = []
         i_key = self._instance_key(instance)
-        vcenter_clusters = self.cluster_list[i_key]
-        if vcenter_clusters:
-            self.log.debug("Vcenter Cluster list : %s",vcenter_clusters)
-            cluster_mors = self.getClusters(instance)
-            for vcenter_cluster in vcenter_clusters:
-                cluster_mor = cluster_mors.get(vcenter_cluster)
-                if cluster_mor:
-                    monitor_clusters.append(cluster_mor)
+        if i_key not in self.monitor_cluster_mors:
+            vcenter_clusters = self.cluster_list[i_key]
+            if vcenter_clusters:
+                self.log.info("Vcenter Cluster list : %s",vcenter_clusters)
+                cluster_mors = self.getClusters(instance)
+                self.log.info("Completed enumeration of clusters for vcenter instance %s" % i_key)
+                for vcenter_cluster in vcenter_clusters:
+                    cluster_mor = cluster_mors.get(vcenter_cluster)
+                    if cluster_mor:
+                        monitor_clusters.append(cluster_mor)
+            else:
+                self.log.warning("Empty cluster list in vcenter configuration.")
+            #update the cluster monitor list
+            self.monitor_cluster_mors[i_key] = monitor_clusters
         else:
-            self.log.warning("Empty cluster list in vcenter configuration.")
+            monitor_clusters = self.monitor_cluster_mors[i_key]
 
         return monitor_clusters
 
@@ -665,8 +672,11 @@ class VSphereCheck(AgentCheck):
                 self.morlist_raw[i_key] = {}
 
             clusters = self.getClustersToMonitor(instance)
-            all_objs = _get_all_objs(server_instance,regexes,include_only_marked,tags,clusters)
-            self.morlist_raw[i_key] = all_objs
+            if clusters:
+                all_objs = _get_all_objs(server_instance,regexes,include_only_marked,tags,clusters)
+                self.morlist_raw[i_key] = all_objs
+            else:
+                self.log.warning("Nothing to monitor , empty cluster list for vcenter instance %s",i_key)
 
         # enumerate and build inventory of resources...
         build_resource_registry(instance, tags, regexes, include_only_marked)
