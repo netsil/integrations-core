@@ -607,7 +607,7 @@ class VSphereCheck(AgentCheck):
             mor_name = str(mor)
             ds_type = properties.get("summary.type")
             ds_info = properties.get("info")
-            if mor_name and ds_info is not None:
+            if mor_name and ds_type and ds_info is not None:
                 if ds_type == "VMFS":
                     if ds_info.vmfs is not None:
                         ds_uuid = ds_info.vmfs.uuid
