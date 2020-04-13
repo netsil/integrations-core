@@ -810,7 +810,7 @@ class VSphereCheck(AgentCheck):
                 last_seen = mor['last_seen']
                 if (time.time() - last_seen) > 2 * REFRESH_MORLIST_INTERVAL:
                     del self.morlist[i_key][resource_type][mor_name]
-                    if resource_type in HISTORICAL_RESOURCES:
+                    if resource_type in HISTORICAL_RESOURCES and mor_name in self.cache_uuids[i_key][resource_type]:
                         del self.cache_uuids[i_key][resource_type][mor_name]
                     self.log.warning("deleted mor %s",mor_name)
 
