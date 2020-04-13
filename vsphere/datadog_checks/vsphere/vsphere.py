@@ -10,6 +10,7 @@ import time
 import traceback
 from collections import defaultdict
 from datetime import datetime
+import uuid
 
 from pyVim import connect
 from pyVmomi import vim  # pylint: disable=E0611
@@ -120,6 +121,9 @@ class VSphereCheck(AgentCheck):
         # cluster mors based on cluster name list to be monitored
         self.monitor_cluster_mors = {}
 
+        # uuid cache
+        self.cache_uuids = {}
+
         # Caching resources, timeouts
         self.cache_times = {}
         for instance in self.instances:
@@ -139,6 +143,9 @@ class VSphereCheck(AgentCheck):
 
             self.event_config[i_key] = instance.get('event_config')
             self.cluster_list[i_key] = instance.get('cluster_list',[])
+            self.cache_uuids[i_key] = {}
+            for vimtype in HISTORICAL_RESOURCES:
+                self.cache_uuids[i_key][vimtype] = {}
 
         # managed entity raw view
         self.registry = {}
@@ -492,7 +499,8 @@ class VSphereCheck(AgentCheck):
                 elif mor_type == vim.HostSystem:
                     property_spec.pathSet.append("summary.hardware.uuid")
                 elif mor_type == vim.Datastore:
-                    property_spec.pathSet.append("summary.url")
+                    property_spec.pathSet.append("info")
+                    property_spec.pathSet.append("summary.type")
                 property_specs.append(property_spec)
 
             return property_specs
@@ -594,7 +602,27 @@ class VSphereCheck(AgentCheck):
 
             return mor_attrs
 
-        def _get_all_objs(server_instance, regexes=None, include_only_marked=False, tags=[], clusters = []):
+        def getDatastoreUuid(mor,properties,datastore_cache):
+            ds_uuid = ""
+            mor_name = str(mor)
+            ds_type = properties.get("summary.type")
+            ds_info = properties.get("info")
+            if mor_name and ds_info is not None:
+                if ds_type == "VMFS":
+                    if ds_info.vmfs is not None:
+                        ds_uuid = ds_info.vmfs.uuid
+            elif ds_type == "NFS":
+                    ds_uuid = datastore_cache.get(mor_name,None)
+                    if ds_uuid is None:
+                        ds_id = mor_name + ":" + ds_info.url
+                        ds_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, ds_id))
+                        datastore_cache.update({mor_name : ds_uuid})
+            else:
+                self.log.debug("Unsupported filesystem volume type : %s",ds_type)
+
+            return ds_uuid
+
+        def _get_all_objs(server_instance, regexes=None, include_only_marked=False, tags=[], clusters = [], uuid_cache = {}):
             """
             Get all the vsphere objects of all types
             """
@@ -651,7 +679,8 @@ class VSphereCheck(AgentCheck):
                         hostname = None
                         mor_type = vim.Datastore
                         entity_type = "container"
-                        entity_id = properties.get("summary.url","")
+                        datastore_cache = uuid_cache.get(vim.Datastore,{})
+                        entity_id = getDatastoreUuid(mor,properties,datastore_cache)
 
                     if mor_type:
                         if vsphere_type:
@@ -673,7 +702,8 @@ class VSphereCheck(AgentCheck):
 
             clusters = self.getClustersToMonitor(instance)
             if clusters:
-                all_objs = _get_all_objs(server_instance,regexes,include_only_marked,tags,clusters)
+                uuid_cache = self.cache_uuids[i_key]
+                all_objs = _get_all_objs(server_instance,regexes,include_only_marked,tags,clusters,uuid_cache)
                 self.morlist_raw[i_key] = all_objs
             else:
                 self.log.warning("Nothing to monitor , empty cluster list for vcenter instance %s",i_key)
