@@ -1045,16 +1045,24 @@ class VSphereCheck(AgentCheck):
             self.log.debug(u"Not collecting metrics for this instance, nothing to do yet: {0}".format(i_key))
             return
 
+        custom_tags = instance.get('tags', [])
         n_mors = 0
+        vm_count = 0
         for resource_type in ALL_RESOURCES_WITH_METRICS:
             mors = self.morlist[i_key].get(resource_type,{})
-            n_mors += len(mors)
+            if resource_type == vim.VirtualMachine:
+                vm_count = len(mors)
+                n_mors += vm_count
+            else:
+                n_mors += len(mors)
 
-        self.log.debug(u"Collecting metrics of %d mors" % n_mors)
+        self.log.debug(u"Collecting metrics of %d mors",n_mors)
 
         for query_specs in self.make_query_specs(instance):
             if query_specs:
                 self.pool.apply_async(self._collect_metrics_atomic, args=(instance, query_specs))
+
+        self.gauge('vsphere.vm.count', vm_count, tags=["vcenter_server:%s" % instance.get('name')] + custom_tags)
 
     def check(self, instance):
         if not self.pool_started:
