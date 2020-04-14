@@ -615,9 +615,14 @@ class VSphereCheck(AgentCheck):
                     ds_uuid = datastore_cache.get(mor_name,None)
                     if ds_uuid is None:
                         ds_id = mor_name + ":" + ds_info.url
-                        ds_id_bytes = ds_id.encode('utf-8')
-                        ds_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, ds_id_bytes))
-                        datastore_cache.update({mor_name : ds_uuid})
+                        try:
+                            ds_id_bytes = ds_id.encode('utf-8')
+                            ds_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, ds_id_bytes))
+                            datastore_cache.update({mor_name : ds_uuid})
+                        except UnicodeError:
+                            self.log.warning(u"Unable to generate uuid for datastore %s",mor_name)
+                            ds_uuid = ""
+                            pass
                     else:
                         self.log.debug(u"uuid found for datastore %s",mor_name)
                 else:
