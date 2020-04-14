@@ -615,10 +615,13 @@ class VSphereCheck(AgentCheck):
                     ds_uuid = datastore_cache.get(mor_name,None)
                     if ds_uuid is None:
                         ds_id = mor_name + ":" + ds_info.url
-                        ds_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, ds_id))
+                        ds_id_bytes = ds_id.encode('utf-8')
+                        ds_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, ds_id_bytes))
                         datastore_cache.update({mor_name : ds_uuid})
+                    else:
+                        self.log.debug(u"uuid found for datastore %s",mor_name)
                 else:
-                    self.log.debug("Unsupported filesystem volume type : %s",ds_type)
+                    self.log.debug(u"Unsupported filesystem volume type : %s",ds_type)
 
             return ds_uuid
 
