@@ -611,14 +611,14 @@ class VSphereCheck(AgentCheck):
                 if ds_type == "VMFS":
                     if ds_info.vmfs is not None:
                         ds_uuid = ds_info.vmfs.uuid
-            elif ds_type == "NFS":
+                elif ds_type == "NFS":
                     ds_uuid = datastore_cache.get(mor_name,None)
                     if ds_uuid is None:
                         ds_id = mor_name + ":" + ds_info.url
                         ds_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, ds_id))
                         datastore_cache.update({mor_name : ds_uuid})
-            else:
-                self.log.debug("Unsupported filesystem volume type : %s",ds_type)
+                else:
+                    self.log.debug("Unsupported filesystem volume type : %s",ds_type)
 
             return ds_uuid
 
