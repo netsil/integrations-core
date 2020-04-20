@@ -393,7 +393,7 @@ class VSphereCheck(AgentCheck):
                     self.log.debug(u"Added uuid : %s for cluster : %s",cluster_uuid,cluster_name)
                 except UnicodeError:
                     self.log.warning(u"Unable to generate uuid for cluster %s",cluster_name)
-                pass
+                    pass
             else:
                 self.log.debug(u"uuid already added for cluster %s",cluster_name)
         else:
