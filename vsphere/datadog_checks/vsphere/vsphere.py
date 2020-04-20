@@ -59,7 +59,7 @@ MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 REALTIME_RESOURCES = [vim.VirtualMachine, vim.HostSystem]
 HISTORICAL_RESOURCES = [vim.Datastore, vim.ClusterComputeResource]
 ALL_RESOURCES_WITH_METRICS = REALTIME_RESOURCES + HISTORICAL_RESOURCES
-ALL_RESOURCES_WITH_NO_METRICS = [vim.ComputeResource, vim.Folder,vim.Datacenter]
+ALL_RESOURCES_WITH_NO_METRICS = [vim.Folder,vim.Datacenter]
 
 # Time after which we reap the jobs that clog the queue
 # TODO: use it
@@ -413,6 +413,8 @@ class VSphereCheck(AgentCheck):
                     if cluster_mor:
                         monitor_clusters.append(cluster_mor)
                         self.addClusterUuid(instance,vcenter_cluster)
+                    else:
+                        self.log.warning("Invalid cluster name %s",vcenter_cluster)
             else:
                 self.log.warning(u"Empty cluster list in vcenter configuration.")
             #update the cluster monitor list
@@ -503,7 +505,7 @@ class VSphereCheck(AgentCheck):
                 obj_spec.selectSet = [cluster2HostTraversal,cluster2DsTraversal]
                 obj_specs.append(obj_spec)
 
-                return obj_specs
+            return obj_specs
 
         def createPropertySpecs(mor_types):
             #Create a list of property specifications based on attributes we want to retrieve per entity type
@@ -639,20 +641,25 @@ class VSphereCheck(AgentCheck):
             obj_list = defaultdict(list)
             all_mors = {}
             # Collect metric mors and their required attributes
+            self.log.debug(u"No. of clusters %d",len(clusters))
             metric_mors = _collect_metric_mors_and_attributes(server_instance,clusters)
+            self.log.debug(u"count of metric mors %d",len(metric_mors))
+
             all_mors.update(metric_mors)
             # Collect non metric mors and their required attributes
             non_metric_mors = _collect_non_metric_mors_and_attributes(server_instance)
+            self.log.debug(u"count of non metric mors %d",len(non_metric_mors))
             all_mors.update(non_metric_mors)
 
             # Add rootFolder since it is not explored by the propertyCollector
             root_mor = server_instance.content.rootFolder
             all_mors[root_mor] = {"name": root_mor.name, "parent": None}
+            self.log.debug(u"Total count of mors %d",len(all_mors))
 
-            metric_resources_tuple = tuple(ALL_RESOURCES_WITH_METRICS)
             for mor, properties in all_mors.items():
                 instance_tags = []
-                if isinstance(mor, metric_resources_tuple) and not self._is_excluded(mor, properties, regexes, include_only_marked):
+                mor_type = type(mor)
+                if  mor_type in ALL_RESOURCES_WITH_METRICS and not self._is_excluded(mor, properties, regexes, include_only_marked):
                     hostname = properties.get("name", "unknown")
                     if properties.get("parent"):
                         instance_tags.extend(_get_parent_tags(mor, all_mors))
@@ -1064,11 +1071,18 @@ class VSphereCheck(AgentCheck):
         vm_count = 0
         for resource_type in ALL_RESOURCES_WITH_METRICS:
             mors = self.morlist[i_key].get(resource_type,{})
+            mor_count = len(mors)
+            if resource_type == vim.HostSystem:
+                self.log.debug(u"Host count %d",mor_count)
+            if resource_type == vim.ClusterComputeResource:
+                self.log.debug(u"Cluster count %d",mor_count)
+            if resource_type == vim.Datastore:
+                self.log.debug(u"Datastore count %d",mor_count)
             if resource_type == vim.VirtualMachine:
-                vm_count = len(mors)
-                n_mors += vm_count
-            else:
-                n_mors += len(mors)
+                self.log.debug(u"Vm count %d",mor_count)
+                vm_count = mor_count
+
+            n_mors += mor_count
 
         self.log.debug(u"Collecting metrics of %d mors",n_mors)
 
