@@ -998,7 +998,10 @@ class VSphereCheck(AgentCheck):
 
     def get_batch_size(self,resource_type):
         # return the max batch size based on resource type
-        if resource_type in REALTIME_RESOURCES or self.max_historical_metrics < 0:
+        if resource_type == vim.ClusterComputeResource:
+            # Collect cluster metrics one by one.
+            max_batch_size = 1
+        elif resource_type in REALTIME_RESOURCES or self.max_historical_metrics < 0:
             # Queries are not limited by vCenter
             max_batch_size = self.metrics_per_query
         else:
