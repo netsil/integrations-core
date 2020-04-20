@@ -525,6 +525,34 @@ class VSphereCheck(AgentCheck):
 
             return property_specs
 
+        def createPropertyOptions():
+            retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
+            # To limit the number of objects retrieved per call.
+            # If batch_collector_size is 0, collect maximum number of objects.
+            retr_opts.maxObjects = self.batch_collector_size or None
+            return retr_opts
+
+        def collectProperties(server_instance,filter_spec,retr_opts):
+            mor_properties = {}
+            # Collect the objects and their properties
+            collector = server_instance.content.propertyCollector
+            res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
+            objects = res.objects
+            # Results can be paginated
+            while res.token is not None:
+                res = collector.ContinueRetrievePropertiesEx(res.token)
+                objects.extend(res.objects)
+
+            for obj in objects:
+                if obj.missingSet:
+                    for prop in obj.missingSet:
+                        self.log.warning(u"Unable to retrieve property %s for object %s: %s",
+                                                        prop.path,str(obj.obj),str(prop.fault))
+
+                mor_properties[obj.obj] = {prop.name: prop.val for prop in obj.propSet} if obj.propSet else {}
+
+            return mor_properties
+
         def _collect_metric_mors_and_attributes(server_instance,clusters):
             obj_specs = createObjectSpecs(clusters)
             property_specs = createPropertySpecs(ALL_RESOURCES_WITH_METRICS)
@@ -533,45 +561,14 @@ class VSphereCheck(AgentCheck):
             filter_spec.objectSet = obj_specs
             filter_spec.propSet = property_specs
 
-            retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
-            # To limit the number of objects retrieved per call.
-            # If batch_collector_size is 0, collect maximum number of objects.
-            retr_opts.maxObjects = self.batch_collector_size or None
-
-            collector = server_instance.content.propertyCollector
-            # Collect the objects and their properties
-            res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
-            objects = res.objects
-            # Results can be paginated
-            while res.token is not None:
-                res = collector.ContinueRetrievePropertiesEx(res.token)
-                objects.extend(res.objects)
-
-            mor_attrs = {}
-            error_counter = 0
-            for obj in objects:
-                if obj.missingSet and error_counter < 10:
-                    for prop in obj.missingSet:
-                        error_counter += 1
-                        self.log.error(
-                            u"Unable to retrieve property %s for object %s: %s",
-                                                prop.path,str(obj.obj),str(prop.fault))
-                        if error_counter == 10:
-                            self.log.error(u"Too many errors during object collection, stop logging")
-                            break
-                mor_attrs[obj.obj] = {prop.name: prop.val for prop in obj.propSet} if obj.propSet else {}
-
+            retr_opts = createPropertyOptions()
+            mor_attrs = collectProperties(server_instance,filter_spec,retr_opts)
             return mor_attrs
 
         def _collect_non_metric_mors_and_attributes(server_instance):
             #collect the non metric types for parents info
-
             content = server_instance.content
             view_ref = content.viewManager.CreateContainerView(content.rootFolder, ALL_RESOURCES_WITH_NO_METRICS, True)
-
-            # Object used to query MORs as well as the attributes we require in one API call
-            # See https://code.vmware.com/apis/358/vsphere#/doc/vmodl.query.PropertyCollector.html
-            collector = content.propertyCollector
 
             # Specify the root object from where we collect the rest of the objects
             obj_spec = vmodl.query.PropertyCollector.ObjectSpec()
@@ -593,33 +590,8 @@ class VSphereCheck(AgentCheck):
             filter_spec.objectSet = [obj_spec]
             filter_spec.propSet = property_specs
 
-            retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
-            # To limit the number of objects retrieved per call.
-            # If batch_collector_size is 0, collect maximum number of objects.
-            retr_opts.maxObjects = self.batch_collector_size or None
-
-            # Collect the objects and their properties
-            res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
-            objects = res.objects
-            # Results can be paginated
-            while res.token is not None:
-                res = collector.ContinueRetrievePropertiesEx(res.token)
-                objects.extend(res.objects)
-
-            mor_attrs = {}
-            error_counter = 0
-            for obj in objects:
-                if obj.missingSet and error_counter < 10:
-                    for prop in obj.missingSet:
-                        error_counter += 1
-                        self.log.error(
-                            u"Unable to retrieve property %s for object %s: %s",
-                                                prop.path,str(obj.obj),str(prop.fault))
-                        if error_counter == 10:
-                            self.log.error(u"Too many errors during object collection, stop logging")
-                            break
-                mor_attrs[obj.obj] = {prop.name: prop.val for prop in obj.propSet} if obj.propSet else {}
-
+            retr_opts = createPropertyOptions()
+            mor_attrs = collectProperties(server_instance,filter_spec,retr_opts)
             return mor_attrs
 
         def getDatastoreUuid(mor,properties,datastore_cache):
