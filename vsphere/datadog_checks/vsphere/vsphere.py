@@ -380,6 +380,25 @@ class VSphereCheck(AgentCheck):
 
         return cluster_mors
 
+    def addClusterUuid(self,instance,cluster_name):
+        i_key = self._instance_key(instance)
+        cluster_cache = self.cache_uuids[i_key].get(vim.ClusterComputeResource)
+        if cluster_name:
+            cluster_uuid = cluster_cache.get(cluster_name,None)
+            if cluster_uuid is None:
+                try:
+                    cluster_name_bytes = cluster_name.encode('utf-8')
+                    cluster_uuid = str(uuid.uuid5(uuid.NAMESPACE_OID, cluster_name_bytes))
+                    cluster_cache.update({cluster_name : cluster_uuid})
+                    self.log.debug(u"Added uuid : %s for cluster : %s",cluster_uuid,cluster_name)
+                except UnicodeError:
+                    self.log.warning(u"Unable to generate uuid for cluster %s",cluster_name)
+                pass
+            else:
+                self.log.debug(u"uuid already added for cluster %s",cluster_name)
+        else:
+            self.log.warning(u"unable to add uuid for empty cluster name")
+
     def getClustersToMonitor(self,instance):
         monitor_clusters = []
         i_key = self._instance_key(instance)
@@ -393,6 +412,7 @@ class VSphereCheck(AgentCheck):
                     cluster_mor = cluster_mors.get(vcenter_cluster)
                     if cluster_mor:
                         monitor_clusters.append(cluster_mor)
+                        self.addClusterUuid(instance,vcenter_cluster)
             else:
                 self.log.warning(u"Empty cluster list in vcenter configuration.")
             #update the cluster monitor list
@@ -603,7 +623,7 @@ class VSphereCheck(AgentCheck):
             return mor_attrs
 
         def getDatastoreUuid(mor,properties,datastore_cache):
-            ds_uuid = ""
+            ds_uuid = None
             mor_name = str(mor)
             ds_type = properties.get("summary.type")
             ds_info = properties.get("info")
@@ -629,6 +649,16 @@ class VSphereCheck(AgentCheck):
                     self.log.debug(u"Unsupported filesystem volume type : %s",ds_type)
 
             return ds_uuid
+
+        def getClusterUuid(properties,cluster_cache):
+            cluster_uuid = None
+            cluster_name = properties.get("name")
+            if cluster_name and cluster_cache:
+                cluster_uuid = cluster_cache.get(cluster_name,None)
+                if cluster_uuid:
+                    self.log.debug(u"uuid found for cluster %s",cluster_name)
+
+            return cluster_uuid
 
         def _get_all_objs(server_instance, regexes=None, include_only_marked=False, tags=[], clusters = [], uuid_cache = {}):
             """
@@ -689,6 +719,14 @@ class VSphereCheck(AgentCheck):
                         entity_type = "container"
                         datastore_cache = uuid_cache.get(vim.Datastore,{})
                         entity_id = getDatastoreUuid(mor,properties,datastore_cache)
+                    elif isinstance(mor, vim.ClusterComputeResource):
+                        vsphere_type = u'vsphere_type:cluster'
+                        instance_tags.append(u'vsphere_cluster:{}'.format(properties.get("name", "unknown")))
+                        hostname = None
+                        mor_type = vim.ClusterComputeResource
+                        entity_type = "cluster"
+                        cluster_cache = uuid_cache.get(vim.ClusterComputeResource,{})
+                        entity_id = getClusterUuid(properties,cluster_cache)
 
                     if mor_type:
                         if vsphere_type:
@@ -848,12 +886,13 @@ class VSphereCheck(AgentCheck):
                 if metric_name in ALLOWED_METRICS_FOR_MOR[mor_type]:
                     new_metadata[mor_type][counter.key] = dict(name = metric_name, unit=counter.unitInfo.key)
 
-        self.cache_times[i_key][METRICS_METADATA][LAST] = time.time()
-
         self.log.debug(u"Collected %d counters metadata in %.3f seconds.", len(counters), t.total())
         self.log.info(u"Finished metadata collection for instance {0}".format(i_key))
         # Reset metadata
         self.metrics_metadata[i_key] = new_metadata
+
+        #update the timestamp
+        self.cache_times[i_key][METRICS_METADATA][LAST] = time.time()
 
         # ## <TEST-INSTRUMENTATION>
         self.histogram('datadog.agent.vsphere.metric_metadata_collection.time', t.total(), tags=custom_tags)
