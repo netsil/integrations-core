@@ -76,6 +76,7 @@ DATASTORE_METRICS = {
 
 # All metrics that can be collected from Clusters.
 CLUSTER_METRICS = {
+    'cpu.usage.average',
     'cpu.usagemhz.average',
     'mem.usage.average',
     'vmop.numClone.latest',
