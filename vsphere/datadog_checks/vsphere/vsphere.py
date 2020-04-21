@@ -667,7 +667,6 @@ class VSphereCheck(AgentCheck):
                     vsphere_type = None
                     entity_type = None
                     entity_id = None
-                    mor_type = None
 
                     if isinstance(mor, vim.VirtualMachine):
                         power_state = properties.get("runtime.powerState")
@@ -684,37 +683,32 @@ class VSphereCheck(AgentCheck):
                             vsphere_type = u'vsphere_type:vm'
                             entity_id = properties.get("config.instanceUuid","")
                             entity_type = "vm"
-                            mor_type = vim.VirtualMachine
+
                     elif isinstance(mor, vim.HostSystem):
                         vsphere_type = u'vsphere_type:host'
-                        mor_type = vim.HostSystem
                         entity_type = "node"
                         entity_id = properties.get("summary.hardware.uuid","")
+
                     elif isinstance(mor, vim.Datastore):
                         vsphere_type = u'vsphere_type:datastore'
                         instance_tags.append(u'vsphere_datastore:{}'.format(properties.get("name", "unknown")))
                         hostname = None
-                        mor_type = vim.Datastore
                         entity_type = "container"
                         datastore_cache = uuid_cache.get(vim.Datastore,{})
                         entity_id = getDatastoreUuid(mor,properties,datastore_cache)
+
                     elif isinstance(mor, vim.ClusterComputeResource):
                         vsphere_type = u'vsphere_type:cluster'
                         instance_tags.append(u'vsphere_cluster:{}'.format(properties.get("name", "unknown")))
                         hostname = None
-                        mor_type = vim.ClusterComputeResource
                         entity_type = "cluster"
                         cluster_cache = uuid_cache.get(vim.ClusterComputeResource,{})
                         entity_id = getClusterUuid(properties,cluster_cache)
 
-                    if mor_type:
+                    if entity_type and entity_id:
                         if vsphere_type:
                             instance_tags.append(vsphere_type)
-                        obj_dict = dict(mor=mor, hostname=hostname, tags=tags+instance_tags)
-                        if entity_type:
-                            obj_dict.update(entity_type=entity_type)
-                        if entity_id:
-                            obj_dict.update(entity_id=entity_id)
+                        obj_dict = dict(mor=mor, hostname=hostname, entity_type=entity_type, entity_id=entity_id, tags=tags+instance_tags)
                         obj_list[mor_type].append(obj_dict)
 
             return obj_list
