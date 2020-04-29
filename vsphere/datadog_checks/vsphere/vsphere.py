@@ -587,40 +587,67 @@ class VSphereCheck(AgentCheck):
 
             return property_specs
 
-        def collectProperties(server_instance,filter_spec,retr_opts):
+        def collectProperties(server_instance,error_config,filter_spec,retr_opts):
             mor_properties = {}
             # Collect the objects and their properties
-            collector = server_instance.content.propertyCollector
-            res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
-            objects = res.objects
-            # Results can be paginated
-            while res.token is not None:
-                res = collector.ContinueRetrievePropertiesEx(res.token)
-                objects.extend(res.objects)
+            try:
+                collector = server_instance.content.propertyCollector
+                res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
+                objects = res.objects
+                # Results can be paginated
+                while res.token is not None:
+                    res = collector.ContinueRetrievePropertiesEx(res.token)
+                    objects.extend(res.objects)
 
-            for obj in objects:
-                if obj.missingSet:
-                    for prop in obj.missingSet:
-                        self.log.warning(u"Unable to retrieve property %s for object %s: %s",
-                                                        prop.path,str(obj.obj),str(prop.fault))
+            except vmodl.query.InvalidProperty, e:
+                err_msg = u"InvalidProperty fault while retrieving cluster properties : %s , %s" % (e.name, str(e.faultMessage))
+                error_config.update(ERR_CODE = 'InvalidProperty')
+                error_config.update(ERR_MSG = err_msg)
+                self.log.warning(err_msg)
 
-                mor_properties[obj.obj] = {prop.name: prop.val for prop in obj.propSet} if obj.propSet else {}
+            except vmodl.fault.InvalidArgument:
+                err_msg = u"InvalidArgument fault while retrieving cluster properties : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
+                error_config.update(ERR_CODE = 'InvalidArgument')
+                error_config.update(ERR_MSG = err_msg)
+                self.log.warning(err_msg)
+
+            except vmodl.fault.InvalidType:
+                err_msg = u"InvalidType fault while retrieving cluster properties : %s , %s" % (str(e.argument),str(e.faultMessage))
+                error_config.update(ERR_CODE = 'InvalidType')
+                error_config.update(ERR_MSG = err_msg)
+                self.log.warning(err_msg)
+
+            except vmodl.RuntimeFault, e:
+                err_msg = u"Runtime fault while retrieving cluster properties : %s , %s" % (str(e.faultCause),str(e.faultMessage))
+                error_config.update(ERR_CODE = 'RuntimeFault')
+                error_config.update(ERR_MSG = err_msg)
+                self.log.warning(err_msg)
+
+            else:
+                for obj in objects:
+                    if obj.missingSet:
+                        for prop in obj.missingSet:
+                            self.log.warning(u"Unable to retrieve property %s for object %s: %s",
+                                                            prop.path,str(obj.obj),str(prop.fault))
+
+                    mor_properties[obj.obj] = {prop.name: prop.val for prop in obj.propSet} if obj.propSet else {}
 
             return mor_properties
 
-        def _collect_metric_mors_and_attributes(server_instance,clusters):
+        def _collect_metric_mors_and_attributes(server_instance,error_config,clusters):
             obj_specs = createObjectSpecs(clusters)
             property_specs = createPropertySpecs(ALL_RESOURCES_WITH_METRICS)
             #Add the list of object and property specifications to the property filter specification
             filter_spec = vmodl.query.PropertyCollector.FilterSpec()
             filter_spec.objectSet = obj_specs
             filter_spec.propSet = property_specs
+            filter_spec.reportMissingObjectsInResults = True
 
             retr_opts = self.createPropertyOptions()
-            mor_attrs = collectProperties(server_instance,filter_spec,retr_opts)
+            mor_attrs = collectProperties(server_instance,error_config,filter_spec,retr_opts)
             return mor_attrs
 
-        def _collect_non_metric_mors_and_attributes(server_instance):
+        def _collect_non_metric_mors_and_attributes(server_instance,error_config):
             #collect the non metric types for parents info
             content = server_instance.content
             view_ref = content.viewManager.CreateContainerView(content.rootFolder, ALL_RESOURCES_WITH_NO_METRICS, True)
@@ -644,9 +671,10 @@ class VSphereCheck(AgentCheck):
             filter_spec = vmodl.query.PropertyCollector.FilterSpec()
             filter_spec.objectSet = [obj_spec]
             filter_spec.propSet = property_specs
+            filter_spec.reportMissingObjectsInResults = True
 
             retr_opts = self.createPropertyOptions()
-            mor_attrs = collectProperties(server_instance,filter_spec,retr_opts)
+            mor_attrs = collectProperties(server_instance,error_config,filter_spec,retr_opts)
             return mor_attrs
 
         def getDatastoreUuid(mor,properties,datastore_cache):
@@ -687,7 +715,7 @@ class VSphereCheck(AgentCheck):
 
             return cluster_uuid
 
-        def _get_all_objs(server_instance, regexes=None, include_only_marked=False, tags=[], clusters = [], uuid_cache = {}):
+        def _get_all_objs(server_instance, error_config, regexes=None, include_only_marked=False, tags=[], clusters = [], uuid_cache = {}):
             """
             Get all the vsphere objects of all types
             """
@@ -695,14 +723,28 @@ class VSphereCheck(AgentCheck):
             all_mors = {}
             # Collect metric mors and their required attributes
             self.log.debug(u"No. of clusters %d",len(clusters))
-            metric_mors = _collect_metric_mors_and_attributes(server_instance,clusters)
+            metric_mors = _collect_metric_mors_and_attributes(server_instance,error_config,clusters)
             self.log.debug(u"count of metric mors %d",len(metric_mors))
 
-            all_mors.update(metric_mors)
+            if metric_mors:
+                all_mors.update(metric_mors)
+            else:
+                #extract the error config to check why monitor exited
+                #raise alarms for vcenter errors if any
+                error_msg = error_config.get('msg')
+                self.log.error(u"Errors while discovering metric mors: %s",error_msg)
+
             # Collect non metric mors and their required attributes
-            non_metric_mors = _collect_non_metric_mors_and_attributes(server_instance)
+            non_metric_mors = _collect_non_metric_mors_and_attributes(server_instance,error_config)
             self.log.debug(u"count of non metric mors %d",len(non_metric_mors))
-            all_mors.update(non_metric_mors)
+
+            if non_metric_mors:
+                all_mors.update(non_metric_mors)
+            else:
+                #extract the error config to check why monitor exited
+                #raise alarms for vcenter errors if any
+                error_msg = error_config.get('msg')
+                self.log.error(u"Errors while discovering non-metric mors: %s",error_msg)
 
             # Add rootFolder since it is not explored by the propertyCollector
             root_mor = server_instance.content.rootFolder
@@ -776,7 +818,7 @@ class VSphereCheck(AgentCheck):
             clusters = self.getClustersToMonitor(instance)
             if clusters:
                 uuid_cache = self.cache_uuids[i_key]
-                all_objs = _get_all_objs(server_instance,regexes,include_only_marked,tags,clusters,uuid_cache)
+                all_objs = _get_all_objs(server_instance,error_config,regexes,include_only_marked,tags,clusters,uuid_cache)
                 self.morlist_raw[i_key] = all_objs
             else:
                 #extract the error config to check why monitor exited
