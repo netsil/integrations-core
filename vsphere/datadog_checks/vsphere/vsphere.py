@@ -68,7 +68,8 @@ MORLIST = 'morlist'
 METRICS_METADATA = 'metrics_metadata'
 LAST = 'last'
 INTERVAL = 'interval'
-
+ERR_CODE = 'code'
+ERR_MSG = 'msg'
 
 def atomic_method(method):
     """ Decorator to catch the exceptions that happen in detached thread atomic tasks
@@ -124,6 +125,9 @@ class VSphereCheck(AgentCheck):
         # uuid cache
         self.cache_uuids = {}
 
+        # error config
+        self.error_configs = {}
+
         # Caching resources, timeouts
         self.cache_times = {}
         for instance in self.instances:
@@ -146,6 +150,10 @@ class VSphereCheck(AgentCheck):
             self.cache_uuids[i_key] = {}
             for vimtype in HISTORICAL_RESOURCES:
                 self.cache_uuids[i_key][vimtype] = {}
+            self.error_configs[i_key] = {
+                    ERR_CODE : None,
+                    ERR_MSG : None
+            }
 
         # managed entity raw view
         self.registry = {}
@@ -349,34 +357,63 @@ class VSphereCheck(AgentCheck):
         filter_spec = vmodl.query.PropertyCollector.FilterSpec()
         filter_spec.objectSet = [obj_spec]
         filter_spec.propSet = [property_spec]
+        filter_spec.reportMissingObjectsInResults = True
 
-        retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
-
-        # Collect the objects and their properties
-        res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
-        objects = res.objects
-        # Results can be paginated
-        while res.token is not None:
-            res = collector.ContinueRetrievePropertiesEx(res.token)
-            objects.extend(res.objects)
+        retr_opts = self.createPropertyOptions()
 
         cluster_mors = {}
-        for obj in objects:
-            if obj.missingSet:
-                for prop in obj.missingSet:
-                    self.log.warning(
-                        u"Unable to retrieve property %s for object %s: %s",
-                                            prop.path,str(obj.obj),str(prop.fault))
+        i_key = self._instance_key(instance)
+        error_config = self.error_configs[i_key]
+        # Collect the objects and their properties
+        try:
+            res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
+            objects = res.objects
+            # Results can be paginated
+            while res.token is not None:
+                res = collector.ContinueRetrievePropertiesEx(res.token)
+                objects.extend(res.objects)
 
-            if obj.propSet:
-                properties = {}
-                for prop in obj.propSet:
-                    properties.update({prop.name : prop.val})
+        except vmodl.query.InvalidProperty, e:
+            err_msg = u"InvalidProperty fault while retrieving cluster properties : %s , %s" % (e.name, str(e.faultMessage))
+            error_config.update(code = 'InvalidProperty')
+            error_config.update(msg = err_msg)
+            self.log.warning(err_msg)
 
-                cluster_name = properties.get("name")
-                self.log.debug(u"Discovered cluster : %s",cluster_name)
-                if cluster_name:
-                    cluster_mors[cluster_name] = obj.obj
+        except vmodl.fault.InvalidArgument:
+            err_msg = u"InvalidArgument fault while retrieving cluster properties : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
+            error_config.update(code = 'InvalidArgument')
+            error_config.update(msg = err_msg)
+            self.log.warning(err_msg)
+
+        except vmodl.fault.InvalidType:
+            err_msg = u"InvalidType fault while retrieving cluster properties : %s , %s" % (str(e.argument),str(e.faultMessage))
+            error_config.update(code = 'InvalidType')
+            error_config.update(msg = err_msg)
+            self.log.warning(err_msg)
+
+        except vmodl.RuntimeFault, e:
+            err_msg = u"Runtime fault while retrieving cluster properties : %s , %s" % (str(e.faultCause),str(e.faultMessage))
+            error_config.update(code = 'RuntimeFault')
+            error_config.update(msg = err_msg)
+            self.log.warning(err_msg)
+
+        else:
+            for obj in objects:
+                if obj.missingSet:
+                    for prop in obj.missingSet:
+                        self.log.warning(
+                            u"Unable to retrieve property %s for object %s: %s",
+                                                prop.path,str(obj.obj),str(prop.fault))
+
+                if obj.propSet:
+                    properties = {}
+                    for prop in obj.propSet:
+                        properties.update({prop.name : prop.val})
+
+                    cluster_name = properties.get("name")
+                    self.log.debug(u"Discovered cluster : %s",cluster_name)
+                    if cluster_name:
+                        cluster_mors[cluster_name] = obj.obj
 
         return cluster_mors
 
@@ -400,6 +437,8 @@ class VSphereCheck(AgentCheck):
             self.log.warning(u"unable to add uuid for empty cluster name")
 
     def getClustersToMonitor(self,instance):
+        i_key = self._instance_key(instance)
+        error_config = self.error_configs[i_key]
         monitor_clusters = []
         i_key = self._instance_key(instance)
         if i_key not in self.monitor_cluster_mors:
@@ -407,22 +446,43 @@ class VSphereCheck(AgentCheck):
             if vcenter_clusters:
                 self.log.info(u"Vcenter Cluster list : %s",vcenter_clusters)
                 cluster_mors = self.getClusters(instance)
-                self.log.info(u"Completed enumeration of clusters for vcenter instance %s" % i_key)
-                for vcenter_cluster in vcenter_clusters:
-                    cluster_mor = cluster_mors.get(vcenter_cluster)
-                    if cluster_mor:
-                        monitor_clusters.append(cluster_mor)
-                        self.addClusterUuid(instance,vcenter_cluster)
-                    else:
-                        self.log.warning("Invalid cluster name %s",vcenter_cluster)
+                if cluster_mors:
+                    self.log.info(u"Completed enumeration of clusters for vcenter instance %s" % i_key)
+                    for vcenter_cluster in vcenter_clusters:
+                        cluster_mor = cluster_mors.get(vcenter_cluster)
+                        if cluster_mor:
+                            monitor_clusters.append(cluster_mor)
+                            self.addClusterUuid(instance,vcenter_cluster)
+                        else:
+                            self.log.warning("Invalid cluster name %s",vcenter_cluster)
+
+                    if not monitor_clusters:
+                        error_msg = u"Invalid cluster list in vcenter configuration"
+                        self.log.warning(error_msg)
+                        error_config.update(ERR_MSG = error_msg)
+                        error_config.update(ERR_CODE = None)
+                else:
+                    self.log.error(u"Discovery of clusters failed.")
+                    error_msg = error_config.get(ERR_MSG)
+                    error_msg = u"Discovery of clusters failed due to %s" % error_msg
+                    error_config.update(ERR_MSG = error_msg)
             else:
                 self.log.warning(u"Empty cluster list in vcenter configuration.")
+                error_config.update(ERR_MSG = error_msg)
+                error_config.update(ERR_CODE = None)
             #update the cluster monitor list
             self.monitor_cluster_mors[i_key] = monitor_clusters
         else:
             monitor_clusters = self.monitor_cluster_mors[i_key]
 
         return monitor_clusters
+
+    def createPropertyOptions(self):
+            retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
+            # To limit the number of objects retrieved per call.
+            # If batch_collector_size is 0, collect maximum number of objects.
+            retr_opts.maxObjects = self.batch_collector_size or None
+            return retr_opts
 
     def _discover_mor(self, instance, tags, regexes=None, include_only_marked=False):
         """
@@ -527,13 +587,6 @@ class VSphereCheck(AgentCheck):
 
             return property_specs
 
-        def createPropertyOptions():
-            retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
-            # To limit the number of objects retrieved per call.
-            # If batch_collector_size is 0, collect maximum number of objects.
-            retr_opts.maxObjects = self.batch_collector_size or None
-            return retr_opts
-
         def collectProperties(server_instance,filter_spec,retr_opts):
             mor_properties = {}
             # Collect the objects and their properties
@@ -563,7 +616,7 @@ class VSphereCheck(AgentCheck):
             filter_spec.objectSet = obj_specs
             filter_spec.propSet = property_specs
 
-            retr_opts = createPropertyOptions()
+            retr_opts = self.createPropertyOptions()
             mor_attrs = collectProperties(server_instance,filter_spec,retr_opts)
             return mor_attrs
 
@@ -592,7 +645,7 @@ class VSphereCheck(AgentCheck):
             filter_spec.objectSet = [obj_spec]
             filter_spec.propSet = property_specs
 
-            retr_opts = createPropertyOptions()
+            retr_opts = self.createPropertyOptions()
             mor_attrs = collectProperties(server_instance,filter_spec,retr_opts)
             return mor_attrs
 
@@ -715,6 +768,7 @@ class VSphereCheck(AgentCheck):
 
         def build_resource_registry(instance, tags, regexes=None, include_only_marked=False):
             i_key = self._instance_key(instance)
+            error_config = self.error_configs[i_key]
             server_instance = self._get_server_instance(instance)
             if i_key not in self.morlist_raw:
                 self.morlist_raw[i_key] = {}
@@ -725,7 +779,10 @@ class VSphereCheck(AgentCheck):
                 all_objs = _get_all_objs(server_instance,regexes,include_only_marked,tags,clusters,uuid_cache)
                 self.morlist_raw[i_key] = all_objs
             else:
-                self.log.warning(u"Nothing to monitor , empty cluster list for vcenter instance %s",i_key)
+                #extract the error config to check why monitor exited
+                #raise alarms for vcenter errors if any
+                error_msg = error_config.get(ERR_MSG)
+                self.log.error(u"Errors for vcenter instance %s : %s",i_key,error_msg)
 
         # enumerate and build inventory of resources...
         build_resource_registry(instance, tags, regexes, include_only_marked)
