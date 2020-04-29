@@ -275,6 +275,7 @@ class VSphereCheck(AgentCheck):
 
     def _get_server_instance(self, instance):
         i_key = self._instance_key(instance)
+        error_config = self.error_configs.get(i_key)
 
         service_check_tags = [
             'vcenter_server:{0}'.format(instance.get('name')),
@@ -309,24 +310,49 @@ class VSphereCheck(AgentCheck):
                     pwd=instance.get('password'),
                     sslContext=context if not ssl_verify or ssl_capath else None
                 )
+
+            except vim.fault.InvalidLogin , e:
+                err_msg = u"Invalid login credentials to %s , %s" % (instance.get('host'), str(e.msg))
+                error_config.update(ERR_CODE = 'InvalidLogin')
+                error_config.update(ERR_MSG = err_msg)
+                self.log.error(err_msg)
+
+            except AttributeError , e:
+                err_msg = u"Invalid configuration parameters : %s" % str(e)
+                error_config.update(ERR_CODE = 'AttributeError')
+                error_config.update(ERR_MSG = err_msg)
+                self.log.error(err_msg)
+
             except Exception as e:
                 err_msg = "Connection to %s failed: %s" % (instance.get('host'), e)
+                error_config.update(ERR_CODE = 'RuntimeFault')
+                error_config.update(ERR_MSG = err_msg)
+                self.log.error(err_msg)
                 self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.CRITICAL,
                                    tags=service_check_tags, message=err_msg)
-                raise Exception(err_msg)
 
-            self.server_instances[i_key] = server_instance
+            else:
+                # Test if the connection is working
+                try:
+                    server_instance.RetrieveContent()
+                    self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.OK,
+                                       tags=service_check_tags)
+                except Exception as e:
+                    err_msg = "Connection to %s died unexpectedly: %s" % (instance.get('host'), e)
+                    error_config.update(ERR_CODE = 'RuntimeFault')
+                    error_config.update(ERR_MSG = err_msg)
+                    self.log.error(err_msg)
+                    self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.CRITICAL,
+                                       tags=service_check_tags, message=err_msg)
+                else:
+                    self.server_instances[i_key] = server_instance
 
-        # Test if the connection is working
-        try:
-            self.server_instances[i_key].RetrieveContent()
-            self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.OK,
-                               tags=service_check_tags)
-        except Exception as e:
-            err_msg = "Connection to %s died unexpectedly: %s" % (instance.get('host'), e)
-            self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.CRITICAL,
-                               tags=service_check_tags, message=err_msg)
-            raise Exception(err_msg)
+            #extract the error config to raise alarms for vcenter errors if any
+            error_msg = error_config.get(ERR_MSG)
+            error_code = error_config.get(ERR_CODE)
+            if error_msg and error_code:
+                self.raiseAlert(instance, error_code, error_msg)
+                raise Exception(error_msg)
 
         return self.server_instances[i_key]
 
