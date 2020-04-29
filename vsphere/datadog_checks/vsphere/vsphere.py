@@ -993,6 +993,7 @@ class VSphereCheck(AgentCheck):
 
         i_key = self._instance_key(instance)
         server_instance = self._get_server_instance(instance)
+        error_config = {ERR_CODE : None,ERR_MSG : None}
         perfManager = server_instance.content.perfManager
         custom_tags = instance.get('tags', [])
         try:
@@ -1017,7 +1018,8 @@ class VSphereCheck(AgentCheck):
                         try:
                             metric_name = self.metrics_metadata[i_key][mor_type][counter_id]['name']
                         except KeyError:
-                            metric_name = None
+                            self.log.debug(u"Skipping this metric value %d, because of missing metric name",counter_id)
+                            continue
 
                         if not perf_metric.value:
                             self.log.debug(u"Skipping `%s` metric because the value is empty", metric_name)
@@ -1060,9 +1062,21 @@ class VSphereCheck(AgentCheck):
                             hostname=mor['hostname'],
                             tags=tags
                         )
-        except Exception:
-            self.log.warning(u"Could not query perf metrics.")
-            pass
+        except vmodl.fault.InvalidArgument , e:
+            err_msg = u"InvalidArgument fault while querying perf metrics : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
+            error_config.update(ERR_CODE = 'InvalidArgument')
+            error_config.update(ERR_MSG = err_msg)
+            self.log.warning(err_msg)
+        except vim.fault.RestrictedByAdministrator , e:
+            err_msg = u"RestrictedByAdministrator fault while querying perf metrics : %s , %s" % (str(e.details), str(e.faultMessage))
+            error_config.update(ERR_CODE = 'RestrictedByAdministrator')
+            error_config.update(ERR_MSG = err_msg)
+            self.log.warning(err_msg)
+        except vmodl.RuntimeFault , e:
+            err_msg = u"Runtime fault while querying perf metrics : %s , %s" % (str(e.faultCause),str(e.faultMessage))
+            error_config.update(ERR_CODE = 'RuntimeFault')
+            error_config.update(ERR_MSG = err_msg)
+            self.log.warning(err_msg)
 
         # ## <TEST-INSTRUMENTATION>
         self.histogram('datadog.agent.vsphere.metric_colection.time', t.total(), tags=custom_tags)
