@@ -26,6 +26,8 @@ from .common import SOURCE_TYPE
 from .event import VSphereEvent
 from .metrics import ALLOWED_METRICS_FOR_MOR
 
+from datadog import initialize,statsd
+
 try:
     # Agent >= 6.0: the check pushes tags invoking `set_external_tags`
     from datadog_agent import set_external_tags
@@ -70,6 +72,10 @@ LAST = 'last'
 INTERVAL = 'interval'
 ERR_CODE = 'code'
 ERR_MSG = 'msg'
+
+#statsd config default values
+STATSD_SERVER_HOST = '127.0.0.1'
+STATSD_SERVER_PORT = 9000
 
 def atomic_method(method):
     """ Decorator to catch the exceptions that happen in detached thread atomic tasks
@@ -166,6 +172,11 @@ class VSphereCheck(AgentCheck):
         self.metric_ids = {}
         self.latest_event_query = {}
 
+        #init the statsd client
+        statsd_host = init_config.get('statsd_server_host',STATSD_SERVER_HOST)
+        statsd_port = init_config.get('statsd_server_port',STATSD_SERVER_PORT)
+        initialize(statsd_host = statsd_host, statsd_port = statsd_port)
+
     def stop(self):
         self.stop_pool()
 
@@ -199,6 +210,23 @@ class VSphereCheck(AgentCheck):
                 self.log.critical("Restarting Pool. One check is stuck.")
                 self.restart_pool()
                 break
+
+    def raiseAlert(self,instance,error_code,error_msg):
+        if error_code == 'InvalidLogin':
+            title = 'NTNX_NC_VC_user_authentication_alert'
+        elif error_code == 'RuntimeFault':
+                title = 'NTNX_NC_VC_server_not_reachable'
+        else:
+            title = None
+
+        if title:
+            text = error_msg
+            alert_type = 'error'
+            tags = []
+            tags.append('vcenter_host:%s' % instance.get('host'))
+            tags.append('vcenter_user:%s' % instance.get('username'))
+            self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s",title,text,alert_type,tags)
+            statsd.event(title = title, text = text, alert_type = alert_type, tags = tags)
 
     def _query_event(self, instance):
         i_key = self._instance_key(instance)
@@ -600,25 +628,25 @@ class VSphereCheck(AgentCheck):
                     objects.extend(res.objects)
 
             except vmodl.query.InvalidProperty, e:
-                err_msg = u"InvalidProperty fault while retrieving cluster properties : %s , %s" % (e.name, str(e.faultMessage))
+                err_msg = u"InvalidProperty fault while collecting properties : %s , %s" % (e.name, str(e.faultMessage))
                 error_config.update(ERR_CODE = 'InvalidProperty')
                 error_config.update(ERR_MSG = err_msg)
                 self.log.warning(err_msg)
 
             except vmodl.fault.InvalidArgument:
-                err_msg = u"InvalidArgument fault while retrieving cluster properties : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
+                err_msg = u"InvalidArgument fault while collecting properties : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
                 error_config.update(ERR_CODE = 'InvalidArgument')
                 error_config.update(ERR_MSG = err_msg)
                 self.log.warning(err_msg)
 
             except vmodl.fault.InvalidType:
-                err_msg = u"InvalidType fault while retrieving cluster properties : %s , %s" % (str(e.argument),str(e.faultMessage))
+                err_msg = u"InvalidType fault while collecting properties : %s , %s" % (str(e.argument),str(e.faultMessage))
                 error_config.update(ERR_CODE = 'InvalidType')
                 error_config.update(ERR_MSG = err_msg)
                 self.log.warning(err_msg)
 
             except vmodl.RuntimeFault, e:
-                err_msg = u"Runtime fault while retrieving cluster properties : %s , %s" % (str(e.faultCause),str(e.faultMessage))
+                err_msg = u"Runtime fault while collecting properties : %s , %s" % (str(e.faultCause),str(e.faultMessage))
                 error_config.update(ERR_CODE = 'RuntimeFault')
                 error_config.update(ERR_MSG = err_msg)
                 self.log.warning(err_msg)
@@ -715,10 +743,14 @@ class VSphereCheck(AgentCheck):
 
             return cluster_uuid
 
-        def _get_all_objs(server_instance, error_config, regexes=None, include_only_marked=False, tags=[], clusters = [], uuid_cache = {}):
+        def _get_all_objs(instance, regexes=None, include_only_marked=False, tags=[], clusters = [], uuid_cache = {}):
             """
             Get all the vsphere objects of all types
             """
+            server_instance = self._get_server_instance(instance)
+            i_key = self._instance_key(instance)
+            error_config = self.error_configs[i_key]
+
             obj_list = defaultdict(list)
             all_mors = {}
             # Collect metric mors and their required attributes
@@ -731,7 +763,9 @@ class VSphereCheck(AgentCheck):
             else:
                 #extract the error config to check why monitor exited
                 #raise alarms for vcenter errors if any
-                error_msg = error_config.get('msg')
+                error_msg = error_config.get(ERR_MSG)
+                error_code = error_config.get(ERR_CODE)
+                self.raiseAlert(instance, error_code, error_msg)
                 self.log.error(u"Errors while discovering metric mors: %s",error_msg)
 
             # Collect non metric mors and their required attributes
@@ -743,7 +777,9 @@ class VSphereCheck(AgentCheck):
             else:
                 #extract the error config to check why monitor exited
                 #raise alarms for vcenter errors if any
-                error_msg = error_config.get('msg')
+                error_msg = error_config.get(ERR_MSG)
+                error_code = error_config.get(ERR_CODE)
+                self.raiseAlert(instance, error_code, error_msg)
                 self.log.error(u"Errors while discovering non-metric mors: %s",error_msg)
 
             # Add rootFolder since it is not explored by the propertyCollector
@@ -811,19 +847,20 @@ class VSphereCheck(AgentCheck):
         def build_resource_registry(instance, tags, regexes=None, include_only_marked=False):
             i_key = self._instance_key(instance)
             error_config = self.error_configs[i_key]
-            server_instance = self._get_server_instance(instance)
             if i_key not in self.morlist_raw:
                 self.morlist_raw[i_key] = {}
 
             clusters = self.getClustersToMonitor(instance)
             if clusters:
                 uuid_cache = self.cache_uuids[i_key]
-                all_objs = _get_all_objs(server_instance,error_config,regexes,include_only_marked,tags,clusters,uuid_cache)
+                all_objs = _get_all_objs(instance,regexes,include_only_marked,tags,clusters,uuid_cache)
                 self.morlist_raw[i_key] = all_objs
             else:
                 #extract the error config to check why monitor exited
                 #raise alarms for vcenter errors if any
                 error_msg = error_config.get(ERR_MSG)
+                error_code = error_config.get(ERR_CODE)
+                self.raiseAlert(instance, error_code, error_msg)
                 self.log.error(u"Errors for vcenter instance %s : %s",i_key,error_msg)
 
         # enumerate and build inventory of resources...
@@ -1078,6 +1115,11 @@ class VSphereCheck(AgentCheck):
             error_config.update(ERR_MSG = err_msg)
             self.log.warning(err_msg)
 
+        #extract the error config to check why monitor exited
+        #raise alarms for vcenter errors if any
+        error_msg = error_config.get(ERR_MSG)
+        error_code = error_config.get(ERR_CODE)
+        self.raiseAlert(instance, error_code, error_msg)
         # ## <TEST-INSTRUMENTATION>
         self.histogram('datadog.agent.vsphere.metric_colection.time', t.total(), tags=custom_tags)
         # ## </TEST-INSTRUMENTATION>
