@@ -36,9 +36,15 @@ init_config:
        attribute:
           - version
      - name: sqlserver.server
-       sql_query: SELECT DISTINCT (CASE WHEN CHARINDEX('\',@@servername) >0 THEN LEFT(@@servername,  CHARINDEX('\', @@servername)-1) else @@servername end) + ' ' + (CASE WHEN CHARINDEX('\',@@servername) >0 THEN SUBSTRING(@@servername,  CHARINDEX('\', @@servername)+1, len(@@servername)) else @@servicename end) AS resource_name -- Datadog;
+       sql_query: DECLARE @server_name varchar(max) = (CASE WHEN CHARINDEX('\',@@servername) >0 THEN LEFT(@@servername,  CHARINDEX('\', @@servername)-1) else @@servername end);DECLARE @service_name varchar(max) = (CASE WHEN CHARINDEX('\',@@servername) >0 THEN SUBSTRING(@@servername,  CHARINDEX('\', @@servername)+1, len(@@servername)) else @@servicename end);SELECT @server_name + ' ' + @service_name as resource_name, @server_name as host_name, @service_name as instance_name -- Datadog;
        attribute:
           - resource_name
+          - host_name
+          - instance_name
+     - name: sqlserver.server
+       sql_query: SELECT CASE when count(NodeName) > 0 then 'Cluster' else 'Standalone' end As deployment_type from sys.dm_os_cluster_nodes -- Datadog;
+       attribute:
+          - deployment_type
      - name: sqlserver.database
        sql_query: SELECT DB_NAME(database_id) AS database_name, SUM(num_of_reads)+ SUM(num_of_writes) AS iops FROM sys.dm_io_virtual_file_stats(null,null) GROUP BY database_id -- Datadog;
        rate_metrics:
@@ -47,6 +53,10 @@ init_config:
           - database_name
        attribute:
           - database_name
+     - name: sqlserver.server
+       sql_query: SELECT COUNT(name) As database_count from sys.databases -- Datadog;
+       attribute:
+          - database_count
      - name: sqlserver.database
        sql_query: SELECT RTRIM(t1.instance_name) AS database_name, t1.log_file_used_percent AS log_file_used_percent FROM (select      instance_name,      MAX(CASE WHEN counter_name = 'Percent Log Used' then cntr_value else null end) log_file_used_percent      FROM sys.dm_os_performance_counters WITH (NOLOCK)      WHERE (counter_name in ('Percent Log Used'))      AND instance_name != '_Total' AND instance_name != 'mssqlsystemresource'      GROUP BY instance_name) t1 -- Datadog;
        tag_by:
