@@ -158,7 +158,8 @@ class SQLServer(AgentCheck):
 
         #init the statsd client
         statsd_host = init_config.get('statsd_server_host','127.0.0.1')
-        statsd_port = os.getenv("STATSD_SERVER_PORT")
+        statsd_port = int(os.getenv('STATSD_SERVER_PORT'))
+        self.log.warning("STATSD_SERVER_PORT is %s", str(statsd_port))
         initialize(statsd_host = statsd_host, statsd_port = statsd_port)
 
         self.connector = init_config.get('connector', 'adodbapi')
