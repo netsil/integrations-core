@@ -9,6 +9,7 @@ for information on how to report the metrics available in the sys.dm_os_performa
 '''
 # stdlib
 import time
+import os
 import traceback, sys
 from contextlib import contextmanager
 from collections import defaultdict
@@ -68,10 +69,6 @@ DM_OS_VIRTUAL_FILE_STATS = "sys.dm_io_virtual_file_stats"
 # Note : This is not actually table, This is a place holder for all other table.
 # goverened by the query.
 DM_CUSTOM_METRIC = "custom_metric_table"
-
-#statsd config default values
-STATSD_SERVER_HOST = '127.0.0.1'
-STATSD_SERVER_PORT = 9000
 
 # SQL Connection failure alert constants and dictionaries
 NTNX__microsoft_sqlserver_user_authn = "NTNX__microsoft_sqlserver_user_authn"
@@ -160,8 +157,8 @@ class SQLServer(AgentCheck):
         self.cached_metrics_data = {}
 
         #init the statsd client
-        statsd_host = init_config.get('statsd_server_host',STATSD_SERVER_HOST)
-        statsd_port = init_config.get('statsd_server_port',STATSD_SERVER_PORT)
+        statsd_host = init_config.get('statsd_server_host','127.0.0.1')
+        statsd_port = os.getenv("STATSD_SERVER_PORT")
         initialize(statsd_host = statsd_host, statsd_port = statsd_port)
 
         self.connector = init_config.get('connector', 'adodbapi')
