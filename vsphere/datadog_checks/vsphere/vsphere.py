@@ -38,6 +38,8 @@ except ImportError:
 
 # Default vCenter sampling interval
 REAL_TIME_INTERVAL = 20
+#https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
+HISTORICAL_TIME_INTERVAL = 300
 # Metrics are only collected on vSphere VMs marked by custom field value
 VM_MONITORING_FLAG = 'DatadogMonitored'
 # The size of the ThreadPool used to process the request queue
@@ -1239,7 +1241,9 @@ class VSphereCheck(AgentCheck):
                     else:
                         # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
                         # contain at least one element
-                        query_spec.startTime = datetime.now() - timedelta(hours=2)
+                        # Use the default sampling period for historical resources
+                        query_spec.intervalId = HISTORICAL_TIME_INTERVAL
+                        query_spec.startTime = datetime.now() - timedelta(seconds=HISTORICAL_TIME_INTERVAL)
 
                     query_specs.append(query_spec)
                 if query_specs:
