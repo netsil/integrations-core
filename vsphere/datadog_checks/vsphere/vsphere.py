@@ -1321,7 +1321,7 @@ class VSphereCheck(AgentCheck):
 
         # Second part: do the job
         self.collect_metrics(instance)
-        self._query_event(instance)
+        #self._query_event(instance)
 
         # For our own sanity
         self._clean()
