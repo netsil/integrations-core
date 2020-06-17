@@ -39,7 +39,7 @@ except ImportError:
 # Default vCenter sampling interval
 REAL_TIME_INTERVAL = 20
 #https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
-HISTORICAL_TIME_INTERVAL = 300
+HISTORICAL_TIME_INTERVAL = 1800
 # Metrics are only collected on vSphere VMs marked by custom field value
 VM_MONITORING_FLAG = 'DatadogMonitored'
 # The size of the ThreadPool used to process the request queue
@@ -1241,10 +1241,16 @@ class VSphereCheck(AgentCheck):
                         query_spec.maxSample = 1  # Request a single datapoint
                     else:
                         # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
-                        # contain at least one element
-                        # Use the default sampling period for historical resources
-                        query_spec.intervalId = HISTORICAL_TIME_INTERVAL
-                        query_spec.startTime = server_instance.CurrentTime() - timedelta(seconds=HISTORICAL_TIME_INTERVAL)
+                        # contain at least one element based on the sampling period of the metrics being fetched
+                        # create offset time based on maximum overlap between historical intervals of 300 & 1800
+                        # for which datastore metrics r available
+                        # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.PerformanceManager.QuerySpec.html
+                        # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
+
+                        offset_time = HISTORICAL_TIME_INTERVAL - 10
+                        server_time = server_instance.CurrentTime()
+                        query_spec.startTime = server_time - timedelta(seconds=offset_time)
+                        query_spec.endTime = server_time
 
                     query_specs.append(query_spec)
                 if query_specs:
