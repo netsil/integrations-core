@@ -1210,6 +1210,7 @@ class VSphereCheck(AgentCheck):
         if i_key not in self.morlist:
             self.log.info(u"Not collecting metrics for this instance, nothing to do yet: {0}".format(i_key))
             return
+        server_instance = self._get_server_instance(instance)
 
         for resource_type in ALL_RESOURCES_WITH_METRICS:
             # Safeguard, let's avoid collecting multiple resource types in the same call
@@ -1243,7 +1244,7 @@ class VSphereCheck(AgentCheck):
                         # contain at least one element
                         # Use the default sampling period for historical resources
                         query_spec.intervalId = HISTORICAL_TIME_INTERVAL
-                        query_spec.startTime = datetime.now() - timedelta(seconds=HISTORICAL_TIME_INTERVAL)
+                        query_spec.startTime = server_instance.CurrentTime() - timedelta(seconds=HISTORICAL_TIME_INTERVAL)
 
                     query_specs.append(query_spec)
                 if query_specs:
