@@ -474,6 +474,8 @@ class SQLServer(AgentCheck):
         tags.append('alertMessage:%s' % alert_message)
         tags.append('endpoint_uuid:%s' % endpoint_uuid)
         tags.append('severity:WARNING')
+        tags.append('username:%s' % instance.get('username'))
+        tags.append('hostname:%s' % instance.get('host'))
         self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s", alert_title, alert_message, ALERT_TYPE_ERROR, tags)
         statsd.event(title = alert_title, text = alert_message, alert_type = ALERT_TYPE_ERROR, tags = tags)
 
@@ -590,6 +592,7 @@ class SQLServer(AgentCheck):
                 if instance_key not in self.instances_metrics:
                     self._make_metric_list_to_collect(instance, self.custom_metrics)
                 metrics_to_collect = self.instances_metrics[instance_key]
+                cumulative_rate_metrics = {}
 
                 with self.get_managed_cursor(instance, self.DEFAULT_DB_KEY) as cursor:
                     # Get sqlserver hostname for each instance as tag.
@@ -618,9 +621,11 @@ class SQLServer(AgentCheck):
                                 metric.fetch_metric(cursor, clerk_rows, clerk_cols, custom_tags)
                             elif type(metric) is SqlComplexMetric:
                                 rows, cols = metric.fetch_all_values(cursor, self.log)
-                                metric.fetch_metric(cursor, rows, cols, custom_tags, self.cached_metrics_data)
+                                metric.fetch_metric(cursor, rows, cols, custom_tags, self.cached_metrics_data, cumulative_rate_metrics)
                         except Exception as e:
                             self.log.error("Could not fetch metric %s for instance %s: %s" % (metric.datadog_name, instance.get("host", ""), e))
+                    for key, value in cumulative_rate_metrics.iteritems():
+                        self.gauge("sqlserver.server.metric.{}".format(key), value, tags=custom_tags)
 
         except Exception as e:
             self.log.warning("Could not fetch metric due to %s" % e)
@@ -814,7 +819,7 @@ class SqlComplexMetric(SqlServerMetric):
             rows.extend(cursor.fetchall())
         return rows, columns
 
-    def fetch_metric(self, cursor, rows, columns, tags, cached_metrics_data):
+    def fetch_metric(self, cursor, rows, columns, tags, cached_metrics_data, cumulative_rate_metrics):
         # This method deals with publishing metric in data dog.
         attribute_index_list = []
         tag_by_indexs = []
@@ -844,6 +849,7 @@ class SqlComplexMetric(SqlServerMetric):
                         context = (metric_name, sorted_tags)
                         if cached_metrics_data.get(context):
                             value, timestamp = cached_metrics_data.get(context)
+                            value = 0 if value > report_value else value
                         else:
                             self.log.info("missing context {0}".format(context))
                             cached_metrics_data[context] = (report_value, current_timestamp)
@@ -851,6 +857,11 @@ class SqlComplexMetric(SqlServerMetric):
 
                         cached_metrics_data[context] = (report_value, current_timestamp)
                         report_value_in_rate = (report_value - value)/(current_timestamp  - timestamp)
+                        if columns[index] in cumulative_rate_metrics:
+                            cumulative_rate_metrics[columns[index]] += report_value_in_rate
+                        else:
+                            cumulative_rate_metrics[columns[index]] = report_value_in_rate
+
                         report_value = report_value_in_rate
 
                 self.report_function(metric_name, report_value, tags=metric_tags)
