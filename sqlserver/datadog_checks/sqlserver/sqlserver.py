@@ -251,8 +251,11 @@ class SQLServer(AgentCheck):
                                                             None))
             except SQLConnectionError:
                 raise
-            except Exception:
+            except Exception as err:
                 self.log.warning("Can't load the metric %s, ignoring", name, exc_info=True)
+                # Could be errors where alert needs to be raised
+                if type(err).__name__ == 'ProgrammingError':
+                    raise
                 continue
 
         # Load any custom metrics from conf.d/sqlserver.yaml
@@ -625,9 +628,11 @@ class SQLServer(AgentCheck):
                             self.log.error("Could not fetch metric %s for instance %s: %s" % (metric.datadog_name, instance.get("host", ""), e))
                     for key, value in cumulative_rate_metrics.iteritems():
                         self.gauge("sqlserver.server.metric.{}".format(key), value, tags=custom_tags)
+            self.register_heartbeat_collections(instance)
 
         except Exception as e:
             self.log.warning("Could not fetch metric due to %s" % e)
+            self.register_heartbeat_collections(instance, e, True)
             self.maybe_raise_alert(e, instance_key, instance)
 
     def do_stored_procedure_check(self, instance, proc):
@@ -759,14 +764,11 @@ class SQLServer(AgentCheck):
                     self.log.info("Could not close adodbapi db connection\n{0}".format(e))
 
                 self.connections[conn_key]['conn'] = rawconn
-            self.register_heartbeat_collections(instance)
         except Exception as e:
             cx = "%s - %s" % (host, database)
             message = "Unable to connect to SQL Server for instance %s." % cx
             self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.CRITICAL,
                                tags=service_check_tags, message=message)
-
-            self.register_heartbeat_collections(instance, e, True)
 
             password = instance.get('password')
             tracebk = traceback.format_exc()
