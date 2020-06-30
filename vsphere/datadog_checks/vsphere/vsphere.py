@@ -48,8 +48,7 @@ DEFAULT_SIZE_POOL = 4
 REFRESH_MORLIST_INTERVAL = 3 * 60
 # The interval in seconds between two refresh of metrics metadata (id<->name)
 REFRESH_METRICS_METADATA_INTERVAL = 10 * 60
-# The amount of jobs batched at the same time in the queue to query available metrics
-BATCH_MORLIST_SIZE = 50
+
 # Maximum number of objects to collect at once by the propertyCollector. The size of the response returned by the query
 # is significantly lower than the size of the queryPerf response, so allow specifying a different value.
 BATCH_COLLECTOR_SIZE = 500
@@ -117,9 +116,6 @@ class VSphereCheck(AgentCheck):
         self.event_config = {}
         # Batch size for property collector
         self.batch_collector_size = init_config.get("batch_property_collector_size", BATCH_COLLECTOR_SIZE)
-
-        # Batch size for query available metrics
-        self.batch_morlist_size = init_config.get('batch_morlist_size', BATCH_MORLIST_SIZE)
 
         # Metrics Query size
         self.max_historical_metrics = init_config.get("max_historical_metrics", DEFAULT_MAX_QUERY_METRICS)
