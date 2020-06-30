@@ -43,7 +43,7 @@ HISTORICAL_TIME_INTERVAL = 1800
 # Metrics are only collected on vSphere VMs marked by custom field value
 VM_MONITORING_FLAG = 'DatadogMonitored'
 # The size of the ThreadPool used to process the request queue
-DEFAULT_SIZE_POOL = 4
+DEFAULT_SIZE_POOL = 10
 # The interval in seconds between two refresh of the entities list
 REFRESH_MORLIST_INTERVAL = 3 * 60
 # The interval in seconds between two refresh of metrics metadata (id<->name)
@@ -53,7 +53,7 @@ REFRESH_METRICS_METADATA_INTERVAL = 10 * 60
 # is significantly lower than the size of the queryPerf response, so allow specifying a different value.
 BATCH_COLLECTOR_SIZE = 500
 
-DEFAULT_METRICS_PER_QUERY = 500
+DEFAULT_METRICS_PER_QUERY = 5000
 DEFAULT_MAX_QUERY_METRICS = 64
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
