@@ -39,7 +39,8 @@ except ImportError:
 # Default vCenter sampling interval
 REAL_TIME_INTERVAL = 20
 #https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
-HISTORICAL_TIME_INTERVAL = 1800
+DATASTORE_TIME_INTERVAL = 1800
+CLUSTER_TIME_INTERVAL = 7200
 # Metrics are only collected on vSphere VMs marked by custom field value
 VM_MONITORING_FLAG = 'DatadogMonitored'
 # The size of the ThreadPool used to process the request queue
@@ -1244,15 +1245,19 @@ class VSphereCheck(AgentCheck):
                     if resource_type in REALTIME_RESOURCES:
                         query_spec.intervalId = REAL_TIME_INTERVAL
                         query_spec.maxSample = 1  # Request a single datapoint
-                    else:
-                        # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
-                        # contain at least one element based on the sampling period of the metrics being fetched
+                    # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
+                    # contain at least one element based on the sampling period of the metrics being fetched
+                    elif resource_type == vim.ClusterComputeResource:
+                        #use 2 hours as timewindow for cluster metrics
+                        server_time = server_instance.CurrentTime()
+                        query_spec.startTime = server_time - timedelta(seconds=CLUSTER_TIME_INTERVAL)
+                        query_spec.endTime = server_time
+                    elif resource_type == vim.Datastore:
                         # create offset time based on maximum overlap between historical intervals of 300 & 1800
                         # for which datastore metrics r available
                         # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.PerformanceManager.QuerySpec.html
                         # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
-
-                        offset_time = HISTORICAL_TIME_INTERVAL - 10
+                        offset_time = DATASTORE_TIME_INTERVAL - 10
                         server_time = server_instance.CurrentTime()
                         query_spec.startTime = server_time - timedelta(seconds=offset_time)
                         query_spec.endTime = server_time
