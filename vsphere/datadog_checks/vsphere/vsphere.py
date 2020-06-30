@@ -535,12 +535,13 @@ class VSphereCheck(AgentCheck):
 
         return monitor_clusters
 
-    def createPropertyOptions(self):
-            retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
-            # To limit the number of objects retrieved per call.
-            # If batch_collector_size is 0, collect maximum number of objects.
-            retr_opts.maxObjects = self.batch_collector_size or None
-            return retr_opts
+    def createPropertyOptions(self,max_object_count = None):
+        retr_opts = vmodl.query.PropertyCollector.RetrieveOptions()
+        # To limit the number of objects retrieved per call.
+        # If batch_collector_size is 0, collect maximum number of objects.
+        if max_object_count is not None:
+            retr_opts.maxObjects = max_object_count
+        return retr_opts
 
     def _discover_mor(self, instance, tags, regexes=None, include_only_marked=False):
         """
