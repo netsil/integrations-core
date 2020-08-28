@@ -1059,7 +1059,9 @@ class VSphereCheck(AgentCheck):
         if counter_id in self.metrics_metadata[i_key][mor_type]:
             unit = self.metrics_metadata[i_key][mor_type][counter_id]['unit']
             if unit == 'percent':
-                return float(value) / 100
+                pct_value = float (value) / 100
+                ppm_value = pct_value * pow(10,4)
+                return ppm_value
 
         # Defaults to return the value without transformation
         return value
