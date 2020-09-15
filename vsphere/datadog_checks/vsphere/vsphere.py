@@ -861,7 +861,7 @@ class VSphereCheck(AgentCheck):
                             vsphere_type = u'vsphere_type:datastore'
                             instance_tags.append(u'vsphere_datastore:{}'.format(properties.get("name", "unknown")))
                             hostname = None
-                            entity_type = "container"
+                            entity_type = "datastore"
                             datastore_cache = uuid_cache.get(vim.Datastore,{})
                             entity_id = getDatastoreUuid(mor,properties,datastore_cache)
 
