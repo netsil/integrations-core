@@ -36,7 +36,8 @@ except ImportError:
     # Agent < 6.0: the Agent pulls tags invoking `VSphereCheck.get_external_host_tags`
     set_external_tags = None
 
-
+# Default collection interval
+COLLECTION_TIME_INTERVAL = 3 * 60
 # Default vCenter sampling interval
 REAL_TIME_INTERVAL = 20
 #https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
@@ -1068,6 +1069,24 @@ class VSphereCheck(AgentCheck):
         # Defaults to return the value without transformation
         return value
 
+    def calculate_average(self,instance, counter_id, mor_type, valid_values):
+        transform_values = list()
+        i_key = self._instance_key(instance)
+        if counter_id in self.metrics_metadata[i_key][mor_type]:
+            unit = self.metrics_metadata[i_key][mor_type][counter_id]['unit']
+            bool transform = False
+            if unit == 'percent':
+                transform = True
+            for v in valid_values:
+                if transform is True:
+                    value = float(v) / 100
+                else:
+                    value = v
+                transform_values.append(value)
+
+        average = sum(transform_values)/len(transform_values)
+        return average
+
     @atomic_method
     def _collect_metrics_atomic(self, instance, query_specs):
         """ Task that collects the metrics listed in the batch of query specs
@@ -1116,7 +1135,10 @@ class VSphereCheck(AgentCheck):
                         if not valid_values:
                             continue
 
-                        value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
+                        if mor_type in REALTIME_RESOURCES:
+                            value = self.calculate_average(instance, counter_id, mor_type, valid_values)
+                        else:
+                            value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
 
                         tags = ['instance:%s' % instance_name]
                         if not mor['hostname']:  # no host tags available
@@ -1254,8 +1276,11 @@ class VSphereCheck(AgentCheck):
                     query_spec.metricId = metrics
                     query_spec.format = "normal"
                     if resource_type in REALTIME_RESOURCES:
+                        # request for all realtime samples in the window based on collection interval
                         query_spec.intervalId = REAL_TIME_INTERVAL
-                        query_spec.maxSample = 1  # Request a single datapoint
+                        server_time = server_instance.CurrentTime()
+                        query_spec.startTime = server_time - timedelta(seconds=COLLECTION_TIME_INTERVAL)
+                        query_spec.endTime = server_time
                     # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
                     # contain at least one element based on the sampling period of the metrics being fetched
                     elif resource_type == vim.ClusterComputeResource:
