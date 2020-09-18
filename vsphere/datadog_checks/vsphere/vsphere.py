@@ -1069,7 +1069,7 @@ class VSphereCheck(AgentCheck):
         # Defaults to return the value without transformation
         return value
 
-    def calculate_average(self,instance, counter_id, mor_type, valid_values):
+    def calculate_average(self, instance, counter_id, mor_type, valid_values):
         transform_values = list()
         i_key = self._instance_key(instance)
         if counter_id in self.metrics_metadata[i_key][mor_type]:
@@ -1304,6 +1304,8 @@ class VSphereCheck(AgentCheck):
 
             #create batch of queries for vm disk metrics
             if resource_type == vim.VirtualMachine and vm_disk_metric_ids:
+                #use max batch size of historical resources since these vm metrics use historical sampling interval
+                max_batch_size = self.get_batch_size(vim.Datastore)
                 for batch in self.make_batch(mors, vm_disk_metric_ids, max_batch_size):
                     vmdisk_query_specs = []
                     for mor, metrics in batch.items():
