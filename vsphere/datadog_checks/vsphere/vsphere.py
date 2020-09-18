@@ -1074,15 +1074,14 @@ class VSphereCheck(AgentCheck):
         i_key = self._instance_key(instance)
         if counter_id in self.metrics_metadata[i_key][mor_type]:
             unit = self.metrics_metadata[i_key][mor_type][counter_id]['unit']
-            bool transform = False
+            transform = False
             if unit == 'percent':
                 transform = True
             for v in valid_values:
                 if transform is True:
-                    value = float(v) / 100
+                    transform_values.append(float(v) / 100)
                 else:
-                    value = v
-                transform_values.append(value)
+                    transform_values.append(v)
 
         average = sum(transform_values)/len(transform_values)
         return average
