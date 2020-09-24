@@ -216,7 +216,9 @@ class VSphereCheck(AgentCheck):
         if error_code == 'InvalidLogin':
             title = 'NTNX_NC_VC_user_authentication_alert'
         elif error_code == 'RuntimeFault':
-                title = 'NTNX_NC_VC_server_not_reachable'
+            title = 'NTNX_NC_VC_server_not_reachable'
+        elif error_code == 'CollectionError':
+            title = 'NTNX_NC_VC_no_data_alert'
         else:
             title = None
 
@@ -655,6 +657,13 @@ class VSphereCheck(AgentCheck):
             try:
                 collector = server_instance.content.propertyCollector
                 res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
+                if res is None:
+                    err_msg = u"No matching objects while collecting properties")
+                    error_config.update({ERR_CODE : 'CollectionError'})
+                    error_config.update({ERR_MSG : err_msg})
+                    self.log.error(err_msg)
+                    return mor_properties
+
                 objects = res.objects
                 # Results can be paginated
                 while res.token is not None:
