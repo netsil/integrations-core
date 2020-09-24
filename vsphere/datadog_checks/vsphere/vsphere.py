@@ -658,7 +658,7 @@ class VSphereCheck(AgentCheck):
                 collector = server_instance.content.propertyCollector
                 res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
                 if res is None:
-                    err_msg = u"No matching objects while collecting properties")
+                    err_msg = u"No matching objects while collecting properties"
                     error_config.update({ERR_CODE : 'CollectionError'})
                     error_config.update({ERR_MSG : err_msg})
                     self.log.error(err_msg)
@@ -891,6 +891,14 @@ class VSphereCheck(AgentCheck):
 
             return obj_list
 
+        def validate_resource_registry(all_resources):
+            if all_resources:
+                for resource_type in ALL_RESOURCES_WITH_METRICS:
+                    if resource_type not in all_resources:
+                        return False
+
+            return True
+
         def build_resource_registry(instance, tags, regexes=None, include_only_marked=False):
             i_key = self._instance_key(instance)
             error_config = self.error_configs[i_key]
@@ -902,6 +910,14 @@ class VSphereCheck(AgentCheck):
                 uuid_cache = self.cache_uuids[i_key]
                 all_objs = _get_all_objs(instance,regexes,include_only_marked,tags,clusters,uuid_cache)
                 self.morlist_raw[i_key] = all_objs
+                #validate if all resource types are discovered
+                #raise no data alert if required
+                if not validate_resource_registry(all_objs):
+                    error_msg = u"Missing objects while collecting properties"
+                    error_code = 'CollectionError'
+                    error_config.update({ERR_CODE : error_code,ERR_MSG : error_msg})
+                    self.log.error(error_msg)
+                    self.raiseAlert(instance, error_code, error_msg)
             else:
                 #extract the error config to check why monitor exited
                 #raise alarms for vcenter errors if any
@@ -1370,6 +1386,11 @@ class VSphereCheck(AgentCheck):
             self.start_pool()
 
         custom_tags = instance.get('tags', [])
+
+        # Reset the errors
+        i_key = self._instance_key(instance)
+        error_config = self.error_configs[i_key]
+        error_config.update({ERR_CODE : None,ERR_MSG : None})
 
         # Update the value of `max_query_metrics` if needed
         server_instance = self._get_server_instance(instance)
