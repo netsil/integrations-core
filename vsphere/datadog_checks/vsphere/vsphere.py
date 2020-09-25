@@ -672,19 +672,19 @@ class VSphereCheck(AgentCheck):
 
             except vmodl.query.InvalidProperty, e:
                 err_msg = u"InvalidProperty fault while collecting properties : %s , %s" % (e.name, str(e.faultMessage))
-                error_config.update({ERR_CODE : 'InvalidProperty'})
+                error_config.update({ERR_CODE : 'CollectionError'})
                 error_config.update({ERR_MSG : err_msg})
                 self.log.warning(err_msg)
 
             except vmodl.fault.InvalidArgument:
                 err_msg = u"InvalidArgument fault while collecting properties : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
-                error_config.update({ERR_CODE : 'InvalidArgument'})
+                error_config.update({ERR_CODE : 'CollectionError'})
                 error_config.update({ERR_MSG : err_msg})
                 self.log.warning(err_msg)
 
             except vmodl.fault.InvalidType:
                 err_msg = u"InvalidType fault while collecting properties : %s , %s" % (str(e.argument),str(e.faultMessage))
-                error_config.update({ERR_CODE : 'InvalidType'})
+                error_config.update({ERR_CODE : 'CollectionError'})
                 error_config.update({ERR_MSG : err_msg})
                 self.log.warning(err_msg)
 
@@ -1198,12 +1198,12 @@ class VSphereCheck(AgentCheck):
                         )
         except vmodl.fault.InvalidArgument , e:
             err_msg = u"InvalidArgument fault while querying perf metrics : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
-            error_config.update({ERR_CODE : 'InvalidArgument'})
+            error_config.update({ERR_CODE : 'CollectionError'})
             error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
         except vim.fault.RestrictedByAdministrator , e:
             err_msg = u"RestrictedByAdministrator fault while querying perf metrics : %s , %s" % (str(e.details), str(e.faultMessage))
-            error_config.update({ERR_CODE : 'RestrictedByAdministrator'})
+            error_config.update({ERR_CODE : 'CollectionError'})
             error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
         except vmodl.RuntimeFault , e:
