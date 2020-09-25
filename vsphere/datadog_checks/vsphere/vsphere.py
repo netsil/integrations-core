@@ -1242,6 +1242,11 @@ class VSphereCheck(AgentCheck):
             error_config.update({ERR_CODE : 'RuntimeFault'})
             error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
+        except ssl.SSLError:
+            err_msg = u"Read operation timed out while querying perf metrics"
+            error_config.update({ERR_CODE : 'CollectionError'})
+            error_config.update({ERR_MSG : err_msg})
+            self.log.warning(err_msg)
 
         #extract the error config to check why monitor exited
         #raise alarms for vcenter errors if any
