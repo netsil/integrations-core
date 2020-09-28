@@ -212,7 +212,7 @@ class VSphereCheck(AgentCheck):
                 self.restart_pool()
                 break
 
-    def raiseAlert(self,instance,error_code,error_msg):
+    def raiseAlert(self,instance,error_code,error_msg,reset=True):
         if error_code == 'InvalidLogin':
             title = 'NTNX_NC_VC_user_authentication_alert'
         elif error_code == 'RuntimeFault':
@@ -234,10 +234,11 @@ class VSphereCheck(AgentCheck):
             self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s",title,text,alert_type,tags)
             statsd.event(title = title, text = text, alert_type = alert_type, tags = tags)
 
-        #reset the error config
-        i_key = self._instance_key(instance)
-        error_config = self.error_configs[i_key]
-        error_config.update({ERR_CODE : None,ERR_MSG : None})
+        if reset is True:
+            #reset the error config
+            i_key = self._instance_key(instance)
+            error_config = self.error_configs[i_key]
+            error_config.update({ERR_CODE : None,ERR_MSG : None})
 
     def _query_event(self, instance):
         i_key = self._instance_key(instance)
@@ -1253,7 +1254,7 @@ class VSphereCheck(AgentCheck):
         error_msg = error_config.get(ERR_MSG)
         error_code = error_config.get(ERR_CODE)
         if error_msg and error_code:
-            self.raiseAlert(instance, error_code, error_msg)
+            self.raiseAlert(instance, error_code, error_msg,False)
 
         self.log.debug(u"Vsphere metric collection time in %.3f seconds.",t.total())
         # ## <TEST-INSTRUMENTATION>
