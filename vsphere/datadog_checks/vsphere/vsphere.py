@@ -331,7 +331,7 @@ class VSphereCheck(AgentCheck):
 
             except AttributeError as e:
                 err_msg = u"Invalid configuration parameters : %s" % str(e)
-                error_config.update({ERR_CODE : 'AttributeError'})
+                error_config.update({ERR_CODE : 'ConfigError'})
                 error_config.update({ERR_MSG : err_msg})
                 self.log.error(err_msg)
 
@@ -433,6 +433,13 @@ class VSphereCheck(AgentCheck):
         # Collect the objects and their properties
         try:
             res = collector.RetrievePropertiesEx([filter_spec], retr_opts)
+            if res is None:
+                err_msg = u"No matching clusters while collecting properties"
+                error_config.update({ERR_CODE : 'CollectionError'})
+                error_config.update({ERR_MSG : err_msg})
+                self.log.error(err_msg)
+                return cluster_mors
+
             objects = res.objects
             # Results can be paginated
             while res.token is not None:
@@ -441,35 +448,36 @@ class VSphereCheck(AgentCheck):
 
         except vmodl.query.InvalidProperty as e:
             err_msg = u"InvalidProperty fault while retrieving cluster properties : %s , %s" % (e.name, str(e.faultMessage))
-            error_config.update(code = 'InvalidProperty')
-            error_config.update(msg = err_msg)
+            error_config.update({ERR_CODE : 'CollectionError'})
+            error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
 
         except vmodl.fault.InvalidArgument as e:
             err_msg = u"InvalidArgument fault while retrieving cluster properties : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
-            error_config.update(code = 'InvalidArgument')
-            error_config.update(msg = err_msg)
+            error_config.update({ERR_CODE : 'CollectionError'})
+            error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
 
         except vmodl.fault.InvalidType as e:
             err_msg = u"InvalidType fault while retrieving cluster properties : %s , %s" % (str(e.argument),str(e.faultMessage))
-            error_config.update(code = 'InvalidType')
-            error_config.update(msg = err_msg)
+            error_config.update({ERR_CODE : 'CollectionError'})
+            error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
 
         except vmodl.RuntimeFault as e:
             err_msg = u"Runtime fault while retrieving cluster properties : %s , %s" % (str(e.faultCause),str(e.faultMessage))
-            error_config.update(code = 'RuntimeFault')
-            error_config.update(msg = err_msg)
+            error_config.update({ERR_CODE : 'RuntimeFault'})
+            error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
 
         else:
             for obj in objects:
                 if obj.missingSet:
                     for prop in obj.missingSet:
-                        self.log.warning(
-                            u"Unable to retrieve property %s for object %s: %s",
-                                                prop.path,str(obj.obj),str(prop.fault))
+                        err_msg = u"Unable to retrieve property %s for object %s , %s" % (prop.path, str(obj.obj), str(prop.fault))
+                        error_config.update({ERR_CODE : 'CollectionError'})
+                        error_config.update({ERR_MSG : err_msg})
+                        self.log.warning(err_msg)
 
                 if obj.propSet:
                     properties = {}
@@ -515,6 +523,11 @@ class VSphereCheck(AgentCheck):
                 self.log.info(u"Vcenter Cluster list : %s",vcenter_clusters)
                 cluster_mors = self.getClusters(instance)
                 if cluster_mors:
+                    #raise alarms for vcenter errors if any
+                    error_msg = error_config.get(ERR_MSG)
+                    error_code = error_config.get(ERR_CODE)
+                    if error_code and error_msg:
+                        self.raiseAlert(instance, error_code, error_msg)
                     self.log.info(u"Completed enumeration of clusters for vcenter instance %s" % i_key)
                     for vcenter_cluster in vcenter_clusters:
                         cluster_mor = cluster_mors.get(vcenter_cluster)
@@ -528,17 +541,18 @@ class VSphereCheck(AgentCheck):
                         error_msg = u"Invalid cluster list in vcenter configuration"
                         self.log.error(error_msg)
                         error_config.update({ERR_MSG : error_msg})
-                        error_config.update({ERR_CODE : None})
+                        error_config.update({ERR_CODE : 'CollectionError'})
                 else:
                     self.log.error(u"Discovery of clusters failed.")
                     error_msg = error_config.get(ERR_MSG)
                     error_msg = u"Discovery of clusters failed due to %s" % error_msg
                     error_config.update({ERR_MSG : error_msg})
+                    error_config.update({ERR_CODE : 'CollectionError'})
             else:
                 error_msg = u"Empty cluster list in vcenter configuration"
                 self.log.error(error_msg)
                 error_config.update({ERR_MSG : error_msg})
-                error_config.update({ERR_CODE : None})
+                error_config.update({ERR_CODE : 'CollectionError'})
             #update the cluster monitor list
             self.monitor_cluster_mors[i_key] = monitor_clusters
         else:
