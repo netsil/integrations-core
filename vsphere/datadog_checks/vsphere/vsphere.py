@@ -1097,7 +1097,6 @@ class VSphereCheck(AgentCheck):
             error_code = 'CollectionError'
             error_config.update({ERR_CODE : error_code,ERR_MSG : error_msg})
             self.log.warning(error_msg)
-            self.raiseAlert(instance, error_code, error_msg)
 
         else:
             if counters:
@@ -1128,6 +1127,12 @@ class VSphereCheck(AgentCheck):
                 # ## <TEST-INSTRUMENTATION>
                 self.histogram('datadog.agent.vsphere.metric_metadata_collection.time', t.total(), tags=custom_tags)
                 # ## </TEST-INSTRUMENTATION>
+
+        #raise alarms for vcenter errors if any
+        error_msg = error_config.get(ERR_MSG)
+        error_code = error_config.get(ERR_CODE)
+        if error_code and error_msg:
+            self.raiseAlert(instance, error_code, error_msg)
 
     def _transform_value(self, instance, counter_id, mor_type, value):
         """ Given the counter_id, look up for the metrics metadata to check the vsphere
