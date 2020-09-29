@@ -56,7 +56,7 @@ REFRESH_METRICS_METADATA_INTERVAL = 10 * 60
 # is significantly lower than the size of the queryPerf response, so allow specifying a different value.
 BATCH_COLLECTOR_SIZE = 500
 
-DEFAULT_METRICS_PER_QUERY = 5000
+DEFAULT_METRICS_PER_QUERY = 500
 DEFAULT_MAX_QUERY_METRICS = 64
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
