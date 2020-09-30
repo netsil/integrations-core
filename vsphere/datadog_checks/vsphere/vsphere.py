@@ -35,7 +35,8 @@ except ImportError:
     # Agent < 6.0: the Agent pulls tags invoking `VSphereCheck.get_external_host_tags`
     set_external_tags = None
 
-
+# Default collection interval
+COLLECTION_TIME_INTERVAL = 3 * 60
 # Default vCenter sampling interval
 REAL_TIME_INTERVAL = 20
 #https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
@@ -46,7 +47,7 @@ VM_MONITORING_FLAG = 'DatadogMonitored'
 # The size of the ThreadPool used to process the request queue
 DEFAULT_SIZE_POOL = 10
 # The interval in seconds between two refresh of the entities list
-REFRESH_MORLIST_INTERVAL = 3 * 60
+REFRESH_MORLIST_INTERVAL = 5 * 60
 # The interval in seconds between two refresh of metrics metadata (id<->name)
 REFRESH_METRICS_METADATA_INTERVAL = 10 * 60
 
@@ -946,6 +947,7 @@ class VSphereCheck(AgentCheck):
 
         """
 
+        t = Timer()
         i_key = self._instance_key(instance)
         self.log.info(u"Caching the morlist for vcenter instance %s" % i_key)
         for resource_type in ALL_RESOURCES_WITH_METRICS:
@@ -967,6 +969,9 @@ class VSphereCheck(AgentCheck):
 
         # Discover hosts and virtual machines
         self._discover_mor(instance, [instance_tag], regexes, include_only_marked)
+
+        self.log.debug(u"Finished morlist discovery for vcenter instance %s in %.3f seconds",i_key,t.total())
+        self.log.info(u"Finished morlist discovery for vcenter instance {0}".format(i_key))
 
         self.cache_times[i_key][MORLIST][LAST] = time.time()
 
@@ -1064,6 +1069,23 @@ class VSphereCheck(AgentCheck):
         # Defaults to return the value without transformation
         return value
 
+    def calculate_average(self, instance, counter_id, mor_type, valid_values):
+        transform_values = list()
+        i_key = self._instance_key(instance)
+        if counter_id in self.metrics_metadata[i_key][mor_type]:
+            unit = self.metrics_metadata[i_key][mor_type][counter_id]['unit']
+            transform = False
+            if unit == 'percent':
+                transform = True
+            for v in valid_values:
+                if transform is True:
+                    transform_values.append(float(v) / 100)
+                else:
+                    transform_values.append(v)
+
+        average = sum(transform_values)/len(transform_values)
+        return average
+
     @atomic_method
     def _collect_metrics_atomic(self, instance, query_specs):
         """ Task that collects the metrics listed in the batch of query specs
@@ -1112,7 +1134,10 @@ class VSphereCheck(AgentCheck):
                         if not valid_values:
                             continue
 
-                        value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
+                        if mor_type in REALTIME_RESOURCES:
+                            value = self.calculate_average(instance, counter_id, mor_type, valid_values)
+                        else:
+                            value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
 
                         tags = ['instance:%s' % instance_name]
                         if not mor['hostname']:  # no host tags available
@@ -1293,7 +1318,7 @@ class VSphereCheck(AgentCheck):
 
             n_mors += mor_count
 
-        self.log.debug(u"Collecting metrics of %d mors",n_mors)
+        self.log.info(u"Collecting metrics of %d mors for vcenter instance %s",n_mors,i_key)
 
         for query_specs in self.make_query_specs(instance):
             if query_specs:
@@ -1332,9 +1357,8 @@ class VSphereCheck(AgentCheck):
 
         if self._should_cache(instance, MORLIST):
             self._cache_morlist_raw(instance)
-
-        self._cache_morlist_process(instance)
-        self._vacuum_morlist(instance)
+            self._cache_morlist_process(instance)
+            self._vacuum_morlist(instance)
 
         # Second part: do the job
         self.collect_metrics(instance)
