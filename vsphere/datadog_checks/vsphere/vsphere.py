@@ -1110,6 +1110,7 @@ class VSphereCheck(AgentCheck):
             error_code = 'CollectionError'
             error_config.update({ERR_CODE : error_code,ERR_MSG : error_msg})
             self.log.warning(error_msg)
+            del self.server_instances[i_key]
 
         else:
             if counters:
