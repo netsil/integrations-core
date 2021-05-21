@@ -337,17 +337,19 @@ class VSphereCheck(AgentCheck):
             try:
                 # Object returned by SmartConnect is a ServerInstance
                 #   https://www.vmware.com/support/developer/vc-sdk/visdk2xpubs/ReferenceGuide/vim.ServiceInstance.html
-                server_instance = connect.SmartConnect(
-                    host=instance.get('host'),
-                    user=instance.get('username'),
-                    pwd=instance.get('password'),
-                    sslContext=context if not ssl_verify or ssl_capath else None
-                )
+                
                 if ':' in str(instance.get('host')):
                     newHost, port = str(instance.get('host')).split(':')
                     server_instance = connect.SmartConnect(
                     host=newHost,
                     port=int(port),
+                    user=instance.get('username'),
+                    pwd=instance.get('password'),
+                    sslContext=context if not ssl_verify or ssl_capath else None
+                    )
+                else:
+                    server_instance = connect.SmartConnect(
+                    host=instance.get('host'),
                     user=instance.get('username'),
                     pwd=instance.get('password'),
                     sslContext=context if not ssl_verify or ssl_capath else None
