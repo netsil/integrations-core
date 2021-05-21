@@ -343,6 +343,15 @@ class VSphereCheck(AgentCheck):
                     pwd=instance.get('password'),
                     sslContext=context if not ssl_verify or ssl_capath else None
                 )
+                if ':' in str(instance.get('host')):
+                    newHost, port = str(instance.get('host')).split(':')
+                    server_instance = connect.SmartConnect(
+                    host=newHost,
+                    port=int(port),
+                    user=instance.get('username'),
+                    pwd=instance.get('password'),
+                    sslContext=context if not ssl_verify or ssl_capath else None
+                )
 
             except vim.fault.InvalidLogin as e:
                 err_msg = u"Invalid login credentials to %s , %s" % (instance.get('host'), str(e.msg))
