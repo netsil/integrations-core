@@ -347,7 +347,7 @@ class VSphereCheck(AgentCheck):
                     if portstr.isdigit():
                         port = int(portstr)
                     else:
-                        self.log.warning("Port provided by the user is Invalid: %s, so default port will be used", portstr)
+                        self.log.warning("Port provided by the user is Invalid: '%s', so default port will be used", portstr)
                     
                 if port >= 1 and port <= 65535:
                     server_instance = connect.SmartConnect(
