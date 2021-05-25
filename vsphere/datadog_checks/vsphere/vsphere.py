@@ -347,22 +347,22 @@ class VSphereCheck(AgentCheck):
                     if portstr.isdigit():
                         port = int(portstr)
                     else:
-                        self.log.warning("Port provided by the user is Invalid, so default port will be used")
+                        self.log.warning("Port provided by the user is Invalid: %s, so default port will be used", portstr)
                     
                 if port >= 1 and port <= 65535:
                     server_instance = connect.SmartConnect(
-                    host=hostip,
-                    port=port,
-                    user=instance.get('username'),
-                    pwd=instance.get('password'),
-                    sslContext=context if not ssl_verify or ssl_capath else None
+                        host=hostip,
+                        port=port,
+                        user=instance.get('username'),
+                        pwd=instance.get('password'),
+                        sslContext=context if not ssl_verify or ssl_capath else None
                     )
                 else:
                     server_instance = connect.SmartConnect(
-                    host=hostip,
-                    user=instance.get('username'),
-                    pwd=instance.get('password'),
-                    sslContext=context if not ssl_verify or ssl_capath else None
+                        host=hostip,
+                        user=instance.get('username'),
+                        pwd=instance.get('password'),
+                        sslContext=context if not ssl_verify or ssl_capath else None
                     )
 
             except vim.fault.InvalidLogin as e:
