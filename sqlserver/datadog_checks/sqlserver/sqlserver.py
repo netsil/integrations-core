@@ -108,6 +108,19 @@ ALERT_TYPE_ERROR = 'error'
 # Constants for heartbeat failed collections
 NTNX_sqlserver_heartbeat_collection = "NTNX_sqlserver_heartbeat_collection"
 
+def calculateExecutionTime(decoratedFunc):
+
+    def wrapper(*args, **kwargs):
+        initalTime = time.time()
+        result = decoratedFunc(*args, **kwargs)
+        endTime = time.time()
+
+        if int(endTime - initalTime) >= 10:
+            # need to send alert in this case asynchronously
+            pass
+        return result
+    return wrapper
+
 class SQLConnectionError(Exception):
     """
     Exception raised for SQL instance connection issues
@@ -551,6 +564,7 @@ class SQLServer(AgentCheck):
         cursor = conn.cursor()
         return cursor
 
+    @calculateExecutionTime
     def get_sql_type(self, instance, counter_name):
         '''
         Return the type of the performance counter so that we can report it to
@@ -593,6 +607,7 @@ class SQLServer(AgentCheck):
         else:
             self.log.debug("Skipping check")
 
+    @calculateExecutionTime
     def do_perf_counter_check(self, instance):
         """
         Fetch the metrics from the sys.dm_os_performance_counters table
@@ -677,6 +692,7 @@ class SQLServer(AgentCheck):
         else:
             self.log.info("Skipping call to %s due to only_if" % (proc))
 
+    @calculateExecutionTime
     def proc_check_guard(self, instance, sql):
         """
         check to see if the guard SQL returns a single column containing 0 or 1
@@ -822,6 +838,7 @@ class SqlComplexMetric(SqlServerMetric):
         self.attributes = cfg_instance.get('attribute',[])
         self.rate_metrics = cfg_instance.get("rate_metrics", None)
 
+    @calculateExecutionTime
     def fetch_all_values(self, cursor, logger):
         # This method fetch all the metric based on the complex metric passed.
         cursor.execute(self.query)
@@ -881,6 +898,7 @@ class SqlComplexMetric(SqlServerMetric):
 class SqlSimpleMetric(SqlServerMetric):
 
     @classmethod
+    @calculateExecutionTime
     def fetch_all_values(cls, cursor, counters_list, logger):
         placeholder = '?'
         placeholders = ', '.join(placeholder for unused in counters_list)
@@ -918,6 +936,7 @@ class SqlSimpleMetric(SqlServerMetric):
 class SqlFractionMetric(SqlServerMetric):
 
     @classmethod
+    @calculateExecutionTime
     def fetch_all_values(cls, cursor, counters_list, logger):
         placeholder = '?'
         placeholders = ', '.join(placeholder for unused in counters_list)
@@ -933,6 +952,7 @@ class SqlFractionMetric(SqlServerMetric):
             results[counter_name.strip()].append(rowlist)
         return results
 
+    @calculateExecutionTime
     def set_instances(self, cursor):
         if self.instance == ALL_INSTANCES:
             cursor.execute(INSTANCES_QUERY, (self.sql_name,))
@@ -1018,6 +1038,7 @@ class SqlIncrFractionMetric(SqlFractionMetric):
 class SqlOsWaitStat(SqlServerMetric):
 
     @classmethod
+    @calculateExecutionTime
     def fetch_all_values(cls, cursor, counters_list, logger):
         if not counters_list:
             return None, None
@@ -1052,6 +1073,7 @@ class SqlOsWaitStat(SqlServerMetric):
 class SqlIoVirtualFileStat(SqlServerMetric):
 
     @classmethod
+    @calculateExecutionTime
     def fetch_all_values(cls, cursor, counters_list, logger):
         if not counters_list:
             return None, None
@@ -1100,6 +1122,7 @@ class SqlIoVirtualFileStat(SqlServerMetric):
 class SqlOsMemoryClerksStat(SqlServerMetric):
 
     @classmethod
+    @calculateExecutionTime
     def fetch_all_values(cls, cursor, counters_list, logger):
         if not counters_list:
             return None, None
