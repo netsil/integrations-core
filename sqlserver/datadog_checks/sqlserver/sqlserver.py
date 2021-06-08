@@ -108,6 +108,11 @@ ALERT_TYPE_ERROR = 'error'
 # Constants for heartbeat failed collections
 NTNX_sqlserver_heartbeat_collection = "NTNX_sqlserver_heartbeat_collection"
 
+# Contant for Query Execution time threshold
+QUERY_EXECUTION_TIME_LIMIT = 10
+
+# Decorator defined to calculate execution time for a given function used to check DB query exec time
+
 def calculateExecutionTime(decoratedFunc):
 
     def wrapper(*args, **kwargs):
@@ -115,11 +120,12 @@ def calculateExecutionTime(decoratedFunc):
         result = decoratedFunc(*args, **kwargs)
         endTime = time.time()
 
-        if int(endTime - initalTime) >= 10:
+        if int(endTime - initalTime) >= QUERY_EXECUTION_TIME_LIMIT:
             # need to send alert in this case asynchronously
             pass
         return result
     return wrapper
+
 
 class SQLConnectionError(Exception):
     """
