@@ -117,7 +117,7 @@ def calculateExecutionTime(decoratedFunc):
     """ Decorator defined to calculate execution time for a given function 
     used to check DB query exec time
     """
-    def send_alert(self, alert_message, alert_title):
+    def send_alert(self, alert_title, alert_message):
         tags = []
         tags.append('alertMessage:%s' % alert_message)
         tags.append('severity:WARNING')
@@ -131,9 +131,9 @@ def calculateExecutionTime(decoratedFunc):
 
         if int(endTime - initalTime) >= QUERY_EXECUTION_TIME_LIMIT:
             # need to send alert in this case asynchronously
-            alert_title = "DB query execution taking longer than expected"
+            alert_title = "NTNX_db_execution_time_exceeded"
             alert_message = "DB call is taking more than {} secs to execute. Raising Alert".format(QUERY_EXECUTION_TIME_LIMIT)
-            send_alert(self, alert_message, alert_title)
+            send_alert(self, alert_title, alert_message)
         return result
     return wrapper
 
