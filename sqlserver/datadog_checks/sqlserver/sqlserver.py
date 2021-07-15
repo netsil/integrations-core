@@ -114,15 +114,26 @@ QUERY_EXECUTION_TIME_LIMIT = 10
 # Decorator defined to calculate execution time for a given function used to check DB query exec time
 
 def calculateExecutionTime(decoratedFunc):
+    """ Decorator defined to calculate execution time for a given function 
+    used to check DB query exec time
+    """
+    def send_alert(self, alert_message, alert_title):
+        tags = []
+        tags.append('alertMessage:%s' % alert_message)
+        tags.append('severity:WARNING')
+        self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s", alert_title, alert_message, ALERT_TYPE_ERROR, tags)
+        statsd.event(title = alert_title, text = alert_message, alert_type = ALERT_TYPE_ERROR, tags = tags)
 
-    def wrapper(*args, **kwargs):
+    def wrapper(self, *args, **kwargs):
         initalTime = time.time()
-        result = decoratedFunc(*args, **kwargs)
+        result = decoratedFunc(self, *args, **kwargs)
         endTime = time.time()
 
         if int(endTime - initalTime) >= QUERY_EXECUTION_TIME_LIMIT:
             # need to send alert in this case asynchronously
-            pass
+            alert_title = "DB query execution taking longer than expected"
+            alert_message = "DB call is taking more than {} secs to execute. Raising Alert".format(QUERY_EXECUTION_TIME_LIMIT)
+            send_alert(self, alert_message, alert_title)
         return result
     return wrapper
 
