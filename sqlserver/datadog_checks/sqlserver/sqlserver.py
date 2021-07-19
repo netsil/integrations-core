@@ -105,6 +105,10 @@ SQLCONNECTION_ALERT_MESSAGES = {
 
 ALERT_TYPE_ERROR = 'error'
 
+global_instance = None
+global_endpoint_uuid = ""
+NTNX__db_execution_time_exceeded = "NTNX_db_execution_time_exceeded"
+
 # Constants for heartbeat failed collections
 NTNX_sqlserver_heartbeat_collection = "NTNX_sqlserver_heartbeat_collection"
 
@@ -120,7 +124,11 @@ def calculateExecutionTime(decoratedFunc):
     def send_alert(self, alert_title, alert_message):
         tags = []
         tags.append('alertMessage:%s' % alert_message)
+        tags.append('endpoint_uuid:%s' % global_endpoint_uuid)
         tags.append('severity:WARNING')
+        if global_endpoint_uuid != None:
+            tags.append('username:%s' % global_instance.get('username'))
+            tags.append('hostname:%s' % global_instance.get('host'))
         self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s", alert_title, alert_message, ALERT_TYPE_ERROR, tags)
         statsd.event(title = alert_title, text = alert_message, alert_type = ALERT_TYPE_ERROR, tags = tags)
 
@@ -131,7 +139,7 @@ def calculateExecutionTime(decoratedFunc):
 
         if int(endTime - initalTime) >= QUERY_EXECUTION_TIME_LIMIT:
             # need to send alert in this case asynchronously
-            alert_title = "NTNX_db_execution_time_exceeded"
+            alert_title = NTNX__db_execution_time_exceeded
             alert_message = "DB call is taking more than {} secs to execute. Raising Alert".format(QUERY_EXECUTION_TIME_LIMIT)
             send_alert(self, alert_title, alert_message)
         return result
@@ -616,6 +624,13 @@ class SQLServer(AgentCheck):
 
     def check(self, instance):
         if self.do_check[self._conn_key(instance, self.DEFAULT_DB_KEY)]:
+            global global_instance
+            global_instance = instance
+
+            endpoint_uuid = self.parse_tags(instance.get('tags', []), ENDPOINT_UUID_STR)
+            global global_endpoint_uuid
+            global_endpoint_uuid = endpoint_uuid
+
             proc = instance.get('stored_procedure')
             if proc is None:
                 self.do_perf_counter_check(instance)
