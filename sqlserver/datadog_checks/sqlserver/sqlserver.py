@@ -126,10 +126,9 @@ def calculateExecutionTime(decoratedFunc):
         tags.append('alertMessage:%s' % alert_message)
         tags.append('endpoint_uuid:%s' % global_endpoint_uuid)
         tags.append('severity:WARNING')
-        if global_endpoint_uuid != None:
+        if global_instance != None:
             tags.append('username:%s' % global_instance.get('username'))
             tags.append('hostname:%s' % global_instance.get('host'))
-        self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s", alert_title, alert_message, ALERT_TYPE_ERROR, tags)
         statsd.event(title = alert_title, text = alert_message, alert_type = ALERT_TYPE_ERROR, tags = tags)
 
     def wrapper(self, *args, **kwargs):
