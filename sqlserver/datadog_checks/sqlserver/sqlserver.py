@@ -16,6 +16,7 @@ import datetime
 import time
 # 3rd party
 import adodbapi
+import pymssql
 try:
     import pyodbc
 except ImportError:
@@ -41,16 +42,16 @@ PERF_COUNTER_LARGE_RAWCOUNT = 65792
 # Queries
 COUNTER_TYPE_QUERY = '''select distinct cntr_type
                         from sys.dm_os_performance_counters
-                        where counter_name = ?;'''
+                        where counter_name = %s;'''
 
 BASE_NAME_QUERY = '''select distinct counter_name
                      from sys.dm_os_performance_counters
-                     where (counter_name=? or counter_name=?
-                     or counter_name=?) and cntr_type=%s;''' % PERF_LARGE_RAW_BASE
+                     where (counter_name=%s or counter_name=%s
+                     or counter_name=%s) and cntr_type=1073939712;'''
 
 INSTANCES_QUERY = '''select instance_name
                      from sys.dm_os_performance_counters
-                     where counter_name=? and instance_name!='_Total';'''
+                     where counter_name=%s and instance_name!='_Total';'''
 
 VALUE_AND_BASE_QUERY = '''select counter_name, cntr_type, cntr_value, instance_name
                           from sys.dm_os_performance_counters
@@ -586,7 +587,7 @@ class SQLServer(AgentCheck):
                               )
                 try:
                     cursor.execute(BASE_NAME_QUERY, candidates)
-                    base_name = cursor.fetchone().counter_name.strip()
+                    base_name = cursor.fetchone()[0].strip()
                     self.log.debug("Got base metric: %s for metric: %s", base_name, counter_name)
                 except Exception as e:
                     self.log.warning("Could not get counter_name of base for metric: %s", e)
@@ -798,7 +799,10 @@ class SQLServer(AgentCheck):
                 rawconn = adodbapi.connect(cs, {'timeout':timeout, 'autocommit':True})
             else:
                 cs += self._conn_string_odbc(db_key, instance=instance, db_name=db_name)
-                rawconn = pyodbc.connect(cs, timeout=timeout)
+                server = host.split(',')[0]
+                port = host.split(',')[1]
+                rawconn = pymssql.connect(server=server, port=port, user=username, password=password, database=database)
+                #rawconn = pyodbc.connect(cs, timeout=timeout)
 
             self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.OK,
                                tags=service_check_tags)
@@ -919,7 +923,7 @@ class SqlSimpleMetric(SqlServerMetric):
 
     @classmethod
     def fetch_all_values(cls, cursor, counters_list, logger):
-        placeholder = '?'
+        placeholder = '%s'
         placeholders = ', '.join(placeholder for unused in counters_list)
         query_base = '''
             select counter_name, instance_name, cntr_value
@@ -927,7 +931,7 @@ class SqlSimpleMetric(SqlServerMetric):
             ''' % placeholders
 
         logger.debug("query base: %s", query_base)
-        cursor.execute(query_base, counters_list)
+        cursor.execute(query_base, tuple(counters_list))
         rows = cursor.fetchall()
         return rows
 
@@ -956,12 +960,12 @@ class SqlFractionMetric(SqlServerMetric):
 
     @classmethod
     def fetch_all_values(cls, cursor, counters_list, logger):
-        placeholder = '?'
+        placeholder = '%s'
         placeholders = ', '.join(placeholder for unused in counters_list)
         query_base = VALUE_AND_BASE_QUERY % placeholders
 
         logger.debug("query base: %s, %s", query_base, str(counters_list))
-        cursor.execute(query_base, counters_list)
+        cursor.execute(query_base, tuple(counters_list))
         rows = cursor.fetchall()
         results = defaultdict(list)
         for counter_name, cntr_type, cntr_value, instance_name in rows:
@@ -1059,12 +1063,12 @@ class SqlOsWaitStat(SqlServerMetric):
         if not counters_list:
             return None, None
 
-        placeholder = '?'
+        placeholder = '%s'
         placeholders = ', '.join(placeholder for unused in counters_list)
         query_base = '''
             select * from sys.dm_os_wait_stats where wait_type in (%s)
             ''' % placeholders
-        cursor.execute(query_base, counters_list)
+        cursor.execute(query_base, tuple(counters_list))
         rows = cursor.fetchall()
         columns = [i[0] for i in cursor.description]
         return rows, columns
@@ -1141,12 +1145,12 @@ class SqlOsMemoryClerksStat(SqlServerMetric):
         if not counters_list:
             return None, None
 
-        placeholder = '?'
+        placeholder = '%s'
         placeholders = ', '.join(placeholder for unused in counters_list)
         query_base = '''
             select * from sys.dm_os_memory_clerks where type in (%s)
             ''' % placeholders
-        cursor.execute(query_base, counters_list)
+        cursor.execute(query_base, tuple(counters_list))
         rows = cursor.fetchall()
         columns = [i[0] for i in cursor.description]
         return rows, columns
