@@ -591,17 +591,16 @@ class SQLServer(AgentCheck):
 
     def check(self, instance):
         if self.do_check[self._conn_key(instance, self.DEFAULT_DB_KEY)]:
-            initalTime = time.time()
-
             proc = instance.get('stored_procedure')
+            initialTime = time.time()
             if proc is None:
                 self.do_perf_counter_check(instance)
             else:
                 self.do_stored_procedure_check(instance, proc)
 
             endTime = time.time()
-            self.log.info("Check for raising alert if it exceeds execution time")
-            if int(endTime - initalTime) >= QUERY_EXECUTION_TIME_LIMIT:
+            self.log.debug("Check for raising alert if it exceeds execution time")
+            if int(endTime - initialTime) >= QUERY_EXECUTION_TIME_LIMIT:
                 self.log.info("Raising alert due to DB execution time exceeded %s secs" % QUERY_EXECUTION_TIME_LIMIT)
                 alert_title = NTNX__db_execution_time_exceeded
                 alert_message = "DB call is taking more than {} secs to execute. Raising Alert".format(QUERY_EXECUTION_TIME_LIMIT)
