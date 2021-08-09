@@ -607,7 +607,7 @@ class SQLServer(AgentCheck):
                 try:
                     self.raise_alert(instance, alert_title, alert_message)
                 except Exception as e:
-                    self.log.debug("Sending Alert for DB execution time exceed FAILED with exception: %s ", e)
+                    self.log.warning("Sending Alert for DB execution time exceed FAILED with exception: %s ", e)
 
         else:
             self.log.debug("Skipping check")
