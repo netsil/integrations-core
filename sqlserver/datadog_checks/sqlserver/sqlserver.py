@@ -112,7 +112,7 @@ NTNX_sqlserver_heartbeat_collection = "NTNX_sqlserver_heartbeat_collection"
 NTNX__collection_latency = "NTNX__collection_latency"
 
 # Constant for Query Execution time threshold
-QUERY_EXECUTION_TIME_LIMIT = 10
+DATA_COLLECTION_TIME_LIMIT = 10
 
 class SQLConnectionError(Exception):
     """
@@ -600,10 +600,10 @@ class SQLServer(AgentCheck):
 
             endTime = time.time()
             self.log.debug("Check for raising alert if it exceeds collection time")
-            if int(endTime - initialTime) >= QUERY_EXECUTION_TIME_LIMIT:
-                self.log.info("Raising alert due to data collection time exceeded %s secs" % QUERY_EXECUTION_TIME_LIMIT)
+            if int(endTime - initialTime) >= DATA_COLLECTION_TIME_LIMIT:
+                self.log.info("Raising alert due to data collection time exceeded %s secs" % DATA_COLLECTION_TIME_LIMIT)
                 alert_title = NTNX__collection_latency
-                alert_message = "Latency in data collection. Taking more than {} secs to collect.".format(QUERY_EXECUTION_TIME_LIMIT)
+                alert_message = "Latency in data collection. Taking more than {} secs to collect.".format(DATA_COLLECTION_TIME_LIMIT)
                 try:
                     self.raise_alert(instance, alert_title, alert_message)
                 except Exception as e:
