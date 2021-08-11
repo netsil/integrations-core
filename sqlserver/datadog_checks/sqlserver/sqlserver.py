@@ -114,6 +114,9 @@ NTNX__collection_latency = "NTNX__collection_latency"
 # Constant for Query Execution time threshold
 DATA_COLLECTION_TIME_LIMIT = 10
 
+#Constant for retry interval for bad connections
+CONNECTION_RETRY_INTERVAL = 30 * 60
+
 class SQLConnectionError(Exception):
     """
     Exception raised for SQL instance connection issues
@@ -159,6 +162,7 @@ class SQLServer(AgentCheck):
         # Cache connections
         self.connections = {}
         self.failed_connections = {}
+        self.failed_instances = {}
         self.instances_metrics = {}
         self.instances_per_type_metrics = defaultdict(dict)
         self.existing_databases = None
@@ -589,7 +593,17 @@ class SQLServer(AgentCheck):
 
         return sql_type, base_name
 
+    def check_timer(self, instance):
+        instance_key = self._conn_key(instance, self.DEFAULT_DB_KEY)
+        instance_ts = self.failed_instances.get(instance_key,None)
+        if instance_ts:
+            current_ts = time.time()
+            if (current_ts - instance_ts) >= CONNECTION_RETRY_INTERVAL:
+                self.do_check[instance_key] = True
+                del self.failed_instances[instance_key]
+
     def check(self, instance):
+        self.check_timer(instance)
         if self.do_check[self._conn_key(instance, self.DEFAULT_DB_KEY)]:
             proc = instance.get('stored_procedure')
             initialTime = time.time()
@@ -664,6 +678,10 @@ class SQLServer(AgentCheck):
             self.log.warning("Could not fetch metric due to %s" % e)
             self.register_heartbeat_collections(instance, e, True)
             self.maybe_raise_alert(e, instance_key, instance)
+            # add bad instance with current timestamp
+            self.failed_instances[instance_key] = time.time()
+            # disable check for the bad instance
+            self.do_check[instance_key] = False
 
     def do_stored_procedure_check(self, instance, proc):
         """
