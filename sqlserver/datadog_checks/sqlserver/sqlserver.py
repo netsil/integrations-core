@@ -16,11 +16,10 @@ import datetime
 import time
 # 3rd party
 import adodbapi
-import pymssql
 try:
-    import pyodbc
+    import pymssql
 except ImportError:
-    pyodbc = None
+    pymssql = None
 
 from config import _is_affirmative
 
@@ -47,7 +46,7 @@ COUNTER_TYPE_QUERY = '''select distinct cntr_type
 BASE_NAME_QUERY = '''select distinct counter_name
                      from sys.dm_os_performance_counters
                      where (counter_name=%s or counter_name=%s
-                     or counter_name=%s) and cntr_type=1073939712;'''
+                     or counter_name=%s) and cntr_type=''' + str(PERF_LARGE_RAW_BASE) + ''';'''
 
 INSTANCES_QUERY = '''select instance_name
                      from sys.dm_os_performance_counters
@@ -148,8 +147,9 @@ class SQLServer(AgentCheck):
         ('sqlserver.buffer.checkpoint_pages', 'Checkpoint pages/sec', '')  # BULK_COUNT
     ]
     valid_connectors = ['adodbapi']
-    if pyodbc is not None:
-        valid_connectors.append('odbc')
+    if pymssql is not None:
+        valid_connectors.append('odbc') # for backward compatibility
+        valid_connectors.append('mssql')
     valid_tables = [
         DEFAULT_PERFORMANCE_TABLE,
         DM_OS_WAIT_STATS_TABLE,
@@ -424,33 +424,6 @@ class SQLServer(AgentCheck):
         '''
         dsn, host, username, password, database, driver = self._get_access_info(instance, db_key, db_name)
         return '%s:%s:%s:%s:%s:%s' % (dsn, host, username, password, database, driver)
-
-    def _conn_string_odbc(self, db_key, instance=None, conn_key=None, db_name=None):
-        ''' Return a connection string to use with odbc
-        '''
-        if instance:
-            dsn, host, username, password, database, driver = self._get_access_info(instance, db_key, db_name)
-        elif conn_key:
-            dsn, host, username, password, database, driver = conn_key.split(":")
-
-        conn_str = ''
-        if dsn:
-            conn_str = 'DSN=%s;' % (dsn)
-
-        if driver:
-            conn_str += 'DRIVER={%s};' % (driver)
-        if host:
-            conn_str += 'Server=%s;' % (host)
-        if database:
-            conn_str += 'Database=%s;' % (database)
-
-        if username:
-            conn_str += 'UID=%s;' % (username)
-        self.log.debug("Connection string (before password) %s" , conn_str)
-        if password:
-            conn_str += 'PWD=%s;' % (password)
-
-        return conn_str
 
     def _conn_string_adodbapi(self, db_key, instance=None, conn_key=None, db_name=None):
         ''' Return a connection string to use with adodbapi
@@ -798,12 +771,12 @@ class SQLServer(AgentCheck):
                 # autocommit: true disables implicit transaction
                 rawconn = adodbapi.connect(cs, {'timeout':timeout, 'autocommit':True})
             else:
-                cs += self._conn_string_odbc(db_key, instance=instance, db_name=db_name)
                 server = host.split(',')[0]
                 port = host.split(',')[1]
-                rawconn = pymssql.connect(server=server, port=port, user=username, password=password, database=database)
-                #rawconn = pyodbc.connect(cs, timeout=timeout)
-
+                if port:
+                    rawconn = pymssql.connect(server=server, port=port, user=username, password=password, database=database)
+                else:
+                    rawconn = pymssql.connect(server=server, user=username, password=password, database=database)
             self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.OK,
                                tags=service_check_tags)
             if conn_key not in self.connections:
