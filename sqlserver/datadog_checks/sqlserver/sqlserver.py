@@ -149,7 +149,7 @@ class SQLServer(AgentCheck):
     valid_connectors = ['adodbapi']
     if pymssql is not None:
         valid_connectors.append('odbc') # for backward compatibility
-        valid_connectors.append('mssql')
+        valid_connectors.append('pymssql')
     valid_tables = [
         DEFAULT_PERFORMANCE_TABLE,
         DM_OS_WAIT_STATS_TABLE,
