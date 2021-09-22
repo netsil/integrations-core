@@ -1258,120 +1258,104 @@ class VSphereCheck(AgentCheck):
         server_instance = self._get_server_instance(instance)
         error_config = {ERR_CODE : None,ERR_MSG : None}
         server_instance = self._get_server_instance(instance)
+        perf_manager = server_instance.content.perfManager
+        custom_tags = instance.get('tags', [])
         try:
-            service_content = server_instance.RetrieveServiceContent()
+            results = perf_manager.QueryPerf(querySpec=query_specs)
+            if results:
+                for entity_metrics in results:
+                    mor_name = str(entity_metrics.entity)
+                    mor_type = type(entity_metrics.entity)
+                    try:
+                        mor = self.morlist[i_key][mor_type][mor_name]
+                    except KeyError:
+                        self.log.warning(u"Trying to get metrics from object %s deleted from the cache, skipping.",mor_name)
+                        continue
 
-        except vmodl.RuntimeFault as e:
-            err_msg = u"Runtime fault while collecting metrics : %s , %s" % (str(e.faultCause),str(e.faultMessage))
-            error_config.update({ERR_CODE : 'RuntimeFault'})
-            error_config.update({ERR_MSG : err_msg})
-            self.log.warning(err_msg)
+                    for perf_metric in entity_metrics.value:
+                        counter_id = perf_metric.id.counterId
+                        if counter_id not in self.metrics_metadata[i_key][mor_type]:
+                            self.log.debug(u"Skipping this metric value %d, because there is no metadata about it",counter_id)
+                            continue
 
-        except ssl.SSLError:
-            err_msg = u"Read operation timed out while collecting metrics"
+                        # Metric types are absolute, delta, and rate
+                        try:
+                            metric_name = self.metrics_metadata[i_key][mor_type][counter_id]['name']
+                        except KeyError:
+                            self.log.debug(u"Skipping this metric value %d, because of missing metric name",counter_id)
+                            continue
+
+                        if not perf_metric.value:
+                            self.log.debug(u"Skipping `%s` metric because the value is empty", metric_name)
+                            continue
+
+                        metric_instance = str(perf_metric.id.instance)
+                        instance_name = metric_instance or "none"
+                        # append metric name with valid instance value for datastore metrics
+                        if isinstance(entity_metrics.entity,vim.Datastore):
+                            if metric_instance and metric_instance in DATASTORE_METRIC_FILE_TYPES:
+                                metric_name = "{0}.{1}".format(metric_name,metric_instance.lower())
+
+                        # Get the most recent value that isn't negative
+                        valid_values = [v for v in perf_metric.value if v >= 0]
+                        if not valid_values:
+                            continue
+
+                        if mor_type in REALTIME_RESOURCES:
+                            value = self.calculate_average(instance, counter_id, mor_type, valid_values)
+                        else:
+                            value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
+
+                        tags = ['instance:%s' % instance_name]
+                        if not mor['hostname']:  # no host tags available
+                            tags.extend(mor['tags'])
+
+                        if custom_tags:
+                            tags.extend(custom_tags)
+
+                        #add the entity id and type to tags
+                        entity_tags = []
+                        entity_id = mor.get('entity_id',None)
+                        entity_type = mor.get('entity_type',None)
+                        if entity_id:
+                            entity_tags.append('entity_id:%s' %entity_id)
+                        if entity_type:
+                            entity_tags.append('entity_type:%s' %entity_type)
+
+                        entity_tags.append('endpoint_uuid:%s' %i_key)
+                        if entity_tags:
+                            tags.extend(entity_tags)
+
+                        self.log.debug(u"query results for %s : %f tags : %s",metric_name,value,tags)
+
+                        # vsphere "rates" should be submitted as gauges (rate is
+                        # precomputed).
+                        self.gauge(
+                            "vsphere.%s" % metric_name,
+                            value,
+                            hostname=mor['hostname'],
+                            tags=tags
+                        )
+        except vmodl.fault.InvalidArgument as e:
+            err_msg = u"InvalidArgument fault while querying perf metrics : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
             error_config.update({ERR_CODE : 'CollectionError'})
             error_config.update({ERR_MSG : err_msg})
             self.log.warning(err_msg)
-
-        else:
-            perfManager = service_content.perfManager
-            custom_tags = instance.get('tags', [])
-            try:
-                results = perfManager.QueryPerf(querySpec=query_specs)
-                if results:
-                    for entity_metrics in results:
-                        mor_name = str(entity_metrics.entity)
-                        mor_type = type(entity_metrics.entity)
-                        try:
-                            mor = self.morlist[i_key][mor_type][mor_name]
-                        except KeyError:
-                            self.log.warning(u"Trying to get metrics from object %s deleted from the cache, skipping.",mor_name)
-                            continue
-
-                        for perf_metric in entity_metrics.value:
-                            counter_id = perf_metric.id.counterId
-                            if counter_id not in self.metrics_metadata[i_key][mor_type]:
-                                self.log.debug(u"Skipping this metric value %d, because there is no metadata about it",counter_id)
-                                continue
-
-                            # Metric types are absolute, delta, and rate
-                            try:
-                                metric_name = self.metrics_metadata[i_key][mor_type][counter_id]['name']
-                            except KeyError:
-                                self.log.debug(u"Skipping this metric value %d, because of missing metric name",counter_id)
-                                continue
-
-                            if not perf_metric.value:
-                                self.log.debug(u"Skipping `%s` metric because the value is empty", metric_name)
-                                continue
-
-                            metric_instance = str(perf_metric.id.instance)
-                            instance_name = metric_instance or "none"
-                            # append metric name with valid instance value for datastore metrics
-                            if isinstance(entity_metrics.entity,vim.Datastore):
-                                if metric_instance and metric_instance in DATASTORE_METRIC_FILE_TYPES:
-                                    metric_name = "{0}.{1}".format(metric_name,metric_instance.lower())
-
-                            # Get the most recent value that isn't negative
-                            valid_values = [v for v in perf_metric.value if v >= 0]
-                            if not valid_values:
-                                continue
-
-                            if mor_type in REALTIME_RESOURCES:
-                                value = self.calculate_average(instance, counter_id, mor_type, valid_values)
-                            else:
-                                value = self._transform_value(instance, counter_id, mor_type, valid_values[-1])
-
-                            tags = ['instance:%s' % instance_name]
-                            if not mor['hostname']:  # no host tags available
-                                tags.extend(mor['tags'])
-
-                            if custom_tags:
-                                tags.extend(custom_tags)
-
-                            #add the entity id and type to tags
-                            entity_tags = []
-                            entity_id = mor.get('entity_id',None)
-                            entity_type = mor.get('entity_type',None)
-                            if entity_id:
-                                entity_tags.append('entity_id:%s' %entity_id)
-                            if entity_type:
-                                entity_tags.append('entity_type:%s' %entity_type)
-
-                            entity_tags.append('endpoint_uuid:%s' %i_key)
-                            if entity_tags:
-                                tags.extend(entity_tags)
-
-                            self.log.debug(u"query results for %s : %f tags : %s",metric_name,value,tags)
-
-                            # vsphere "rates" should be submitted as gauges (rate is
-                            # precomputed).
-                            self.gauge(
-                                "vsphere.%s" % metric_name,
-                                value,
-                                hostname=mor['hostname'],
-                                tags=tags
-                            )
-            except vmodl.fault.InvalidArgument as e:
-                err_msg = u"InvalidArgument fault while querying perf metrics : %s , %s" % (str(e.invalidProperty), str(e.faultMessage))
-                error_config.update({ERR_CODE : 'CollectionError'})
-                error_config.update({ERR_MSG : err_msg})
-                self.log.warning(err_msg)
-            except vim.fault.RestrictedByAdministrator as e:
-                err_msg = u"RestrictedByAdministrator fault while querying perf metrics : %s , %s" % (str(e.details), str(e.faultMessage))
-                error_config.update({ERR_CODE : 'CollectionError'})
-                error_config.update({ERR_MSG : err_msg})
-                self.log.warning(err_msg)
-            except vmodl.RuntimeFault as e:
-                err_msg = u"Runtime fault while querying perf metrics : %s , %s" % (str(e.faultCause),str(e.faultMessage))
-                error_config.update({ERR_CODE : 'RuntimeFault'})
-                error_config.update({ERR_MSG : err_msg})
-                self.log.warning(err_msg)
-            except ssl.SSLError:
-                err_msg = u"Read operation timed out while querying perf metrics"
-                error_config.update({ERR_CODE : 'CollectionError'})
-                error_config.update({ERR_MSG : err_msg})
-                self.log.warning(err_msg)
+        except vim.fault.RestrictedByAdministrator as e:
+            err_msg = u"RestrictedByAdministrator fault while querying perf metrics : %s , %s" % (str(e.details), str(e.faultMessage))
+            error_config.update({ERR_CODE : 'CollectionError'})
+            error_config.update({ERR_MSG : err_msg})
+            self.log.warning(err_msg)
+        except vmodl.RuntimeFault as e:
+            err_msg = u"Runtime fault while querying perf metrics : %s , %s" % (str(e.faultCause),str(e.faultMessage))
+            error_config.update({ERR_CODE : 'RuntimeFault'})
+            error_config.update({ERR_MSG : err_msg})
+            self.log.warning(err_msg)
+        except ssl.SSLError:
+            err_msg = u"Read operation timed out while querying perf metrics"
+            error_config.update({ERR_CODE : 'CollectionError'})
+            error_config.update({ERR_MSG : err_msg})
+            self.log.warning(err_msg)
 
         #extract the error config to check why monitor exited
         #raise alarms for vcenter errors if any
