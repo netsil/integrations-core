@@ -1533,6 +1533,7 @@ class VSphereCheck(AgentCheck):
             self.log.debug(u"Not collecting metrics for this instance, nothing to do yet: {0}".format(i_key))
             return
 
+        error_config = self.error_configs[i_key]
         custom_tags = instance.get('tags', [])
         n_mors = 0
         vm_count = 0
@@ -1560,9 +1561,18 @@ class VSphereCheck(AgentCheck):
                     self.task_list.append(self.pool.apply_async(self._collect_metrics_atomic, args=(instance, query_specs)))
 
         except Exception as e:
-            self.log.warning("Unable to schedule metric collection tasks: %s", e)
+            err_msg = u"Unable to schedule metric collection tasks: %s" % (e)
+            error_config.update({ERR_CODE : 'CollectionError'})
+            error_config.update({ERR_MSG : err_msg})
+            self.log.warning(err_msg)
 
         self.gauge('vsphere.vm.count', vm_count, tags=["vcenter_server:%s" % instance.get('name')] + custom_tags)
+
+        #raise alarms if any
+        error_msg = error_config.get(ERR_MSG)
+        error_code = error_config.get(ERR_CODE)
+        if error_code and error_msg:
+            self.raiseAlert(instance, error_code, error_msg)
 
     def get_max_query_metrics(self,instance):
         server_instance = self._get_server_instance(instance)
