@@ -50,7 +50,7 @@ DEFAULT_SIZE_POOL = 10
 # The interval in seconds between two refresh of the entities list
 REFRESH_MORLIST_INTERVAL = 5 * 60
 # The interval in seconds between two refresh of metrics metadata (id<->name)
-REFRESH_METRICS_METADATA_INTERVAL = 10 * 60
+REFRESH_METRICS_METADATA_INTERVAL = 30 * 60
 
 # Maximum number of objects to collect at once by the propertyCollector. The size of the response returned by the query
 # is significantly lower than the size of the queryPerf response, so allow specifying a different value.
@@ -61,6 +61,7 @@ DEFAULT_MAX_QUERY_METRICS = 64
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
+UNLIMITED_HIST_METRICS_PER_QUERY = float('inf')
 
 REALTIME_RESOURCES = [vim.VirtualMachine, vim.HostSystem]
 HISTORICAL_RESOURCES = [vim.Datastore, vim.ClusterComputeResource]
@@ -1563,6 +1564,15 @@ class VSphereCheck(AgentCheck):
 
         self.gauge('vsphere.vm.count', vm_count, tags=["vcenter_server:%s" % instance.get('name')] + custom_tags)
 
+    def get_max_query_metrics(self,instance):
+        server_instance = self._get_server_instance(instance)
+        vcenter_settings = server_instance.content.setting.QueryOptions(MAX_QUERY_METRICS_OPTION)
+        vcenter_max_historical_metrics = int(vcenter_settings[0].value)
+        if vcenter_max_historical_metrics > 0:
+            return vcenter_max_historical_metrics
+        else:
+            return UNLIMITED_HIST_METRICS_PER_QUERY
+
     def check(self, instance):
         if not self.pool_started:
             self.start_pool()
@@ -1575,17 +1585,22 @@ class VSphereCheck(AgentCheck):
         error_config.update({ERR_CODE : None,ERR_MSG : None})
 
         # Update the value of `max_query_metrics` if needed
-        server_instance = self._get_server_instance(instance)
+        #server_instance = self._get_server_instance(instance)
         try:
-            vcenter_settings = server_instance.content.setting.QueryOptions(MAX_QUERY_METRICS_OPTION)
-            vcenter_max_hist_metrics = int(vcenter_settings[0].value)
-            if vcenter_max_hist_metrics < 0:
-                self.max_historical_metrics = float('inf')
-            else:
+            vcenter_max_hist_metrics = self.get_max_query_metrics(instance)
+            if vcenter_max_hist_metrics < self.max_historical_metrics:
+                self.log.warning(
+                    u"The integration was configured with `max_query_metrics: %d` but your vCenter has a"
+                    u"limit of %d which is lower. Ignoring your configuration in favor of the vCenter value."
+                    u"To update the vCenter value, please update the `%s` field",
+                    self.max_historical_metrics,
+                    vcenter_max_hist_metrics,
+                    MAX_QUERY_METRICS_OPTION,
+                )
                 self.max_historical_metrics = vcenter_max_hist_metrics
         except Exception:
             self.max_historical_metrics = DEFAULT_MAX_QUERY_METRICS
-            self.log.debug(u"Could not fetch the value of %s, setting `max_historical_metrics` to default value %d.",
+            self.log.info(u"Could not fetch the value of %s, setting `max_historical_metrics` to default value %d.",
                                                                 MAX_QUERY_METRICS_OPTION,DEFAULT_MAX_QUERY_METRICS)
             pass
 
