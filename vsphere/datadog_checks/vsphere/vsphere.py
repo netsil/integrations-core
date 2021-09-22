@@ -1432,6 +1432,7 @@ class VSphereCheck(AgentCheck):
             return
         server_instance = self._get_server_instance(instance)
         error_config = self.error_configs[i_key]
+        server_time = server_instance.CurrentTime()
         try:
 
             for resource_type in ALL_RESOURCES_WITH_METRICS:
@@ -1467,7 +1468,6 @@ class VSphereCheck(AgentCheck):
                             vmdisk_query_spec.entity = mor
                             vmdisk_query_spec.metricId = metrics
                             vmdisk_query_spec.format = "normal"
-                            server_time = server_instance.CurrentTime()
                             vmdisk_query_spec.startTime = server_time - timedelta(seconds=DATASTORE_TIME_INTERVAL)
                             vmdisk_query_spec.endTime = server_time
                             vmdisk_query_specs.append(vmdisk_query_spec)
@@ -1485,14 +1485,12 @@ class VSphereCheck(AgentCheck):
                         if resource_type in REALTIME_RESOURCES:
                             # request for all realtime samples in the window based on collection interval
                             query_spec.intervalId = REAL_TIME_INTERVAL
-                            server_time = server_instance.CurrentTime()
                             query_spec.startTime = server_time - timedelta(seconds=COLLECTION_TIME_INTERVAL)
                             query_spec.endTime = server_time
                         # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
                         # contain at least one element based on the sampling period of the metrics being fetched
                         elif resource_type == vim.ClusterComputeResource:
                             #use 2 hours as timewindow for cluster metrics
-                            server_time = server_instance.CurrentTime()
                             query_spec.startTime = server_time - timedelta(seconds=CLUSTER_TIME_INTERVAL)
                             query_spec.endTime = server_time
                         elif resource_type == vim.Datastore:
@@ -1501,7 +1499,6 @@ class VSphereCheck(AgentCheck):
                             # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.PerformanceManager.QuerySpec.html
                             # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
                             offset_time = DATASTORE_TIME_INTERVAL - 10
-                            server_time = server_instance.CurrentTime()
                             query_spec.startTime = server_time - timedelta(seconds=offset_time)
                             query_spec.endTime = server_time
 
@@ -1556,11 +1553,14 @@ class VSphereCheck(AgentCheck):
 
         self.log.info(u"Collecting metrics of %d mors for vcenter instance %s",n_mors,i_key)
 
-        
         self.task_list = []
-        for query_specs in self.make_query_specs(instance):
-            if query_specs:
-                self.task_list.append(self.pool.apply_async(self._collect_metrics_atomic, args=(instance, query_specs)))
+        try:
+            for query_specs in self.make_query_specs(instance):
+                if query_specs:
+                    self.task_list.append(self.pool.apply_async(self._collect_metrics_atomic, args=(instance, query_specs)))
+
+        except Exception as e:
+            self.log.warning("Unable to schedule metric collection tasks: %s", e)
 
         self.gauge('vsphere.vm.count', vm_count, tags=["vcenter_server:%s" % instance.get('name')] + custom_tags)
 
