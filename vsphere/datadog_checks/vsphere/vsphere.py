@@ -1418,7 +1418,6 @@ class VSphereCheck(AgentCheck):
         error_config = self.error_configs[i_key]
         server_time = server_instance.CurrentTime()
         try:
-
             for resource_type in ALL_RESOURCES_WITH_METRICS:
                 # Safeguard, let's avoid collecting multiple resource types in the same call
                 # get entire list of mors with matching resource_type
@@ -1579,13 +1578,12 @@ class VSphereCheck(AgentCheck):
         error_config.update({ERR_CODE : None,ERR_MSG : None})
 
         # Update the value of `max_query_metrics` if needed
-        #server_instance = self._get_server_instance(instance)
         try:
             vcenter_max_hist_metrics = self.get_max_query_metrics(instance)
             if vcenter_max_hist_metrics < self.max_historical_metrics:
                 self.log.warning(
-                    u"The integration was configured with `max_query_metrics: %d` but your vCenter has a"
-                    u"limit of %d which is lower. Ignoring your configuration in favor of the vCenter value."
+                    u"The integration was configured with `max_query_metrics: %d` but vCenter has a"
+                    u"lower limit of %d. Hence ignoring configuration in favor of the vCenter value."
                     u"To update the vCenter value, please update the `%s` field",
                     self.max_historical_metrics,
                     vcenter_max_hist_metrics,
