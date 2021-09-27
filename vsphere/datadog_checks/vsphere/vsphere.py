@@ -80,6 +80,7 @@ LAST = 'last'
 INTERVAL = 'interval'
 ERR_CODE = 'code'
 ERR_MSG = 'msg'
+START_TIMESTAMP = 'startTime'
 
 #statsd config default values
 STATSD_SERVER_HOST = '127.0.0.1'
@@ -139,6 +140,9 @@ class VSphereCheck(AgentCheck):
         # error config
         self.error_configs = {}
 
+        # collection timestamp for realtime mors
+        self.collection_ts = {}
+
         # Caching resources, timeouts
         self.cache_times = {}
         for instance in self.instances:
@@ -165,6 +169,7 @@ class VSphereCheck(AgentCheck):
                     ERR_CODE : None,
                     ERR_MSG : None
             }
+            self.collection_ts[i_key] = {}
 
         # managed entity raw view
         self.registry = {}
@@ -1404,6 +1409,25 @@ class VSphereCheck(AgentCheck):
         if batch:
             yield batch
 
+    def get_collection_time(self,instance):
+        current = None
+        i_key = self._instance_key(instance)
+        instance_ts = self.collection_ts.get(i_key)
+        timestamp = instance_ts.get(START_TIMESTAMP,None)
+        if timestamp:
+            current = timestamp
+            #update the timestamp for next iteration
+            timestamp = timestamp + timedelta(seconds=COLLECTION_TIME_INTERVAL)
+            instance_ts.update({START_TIMESTAMP : timestamp})
+        else:
+            server_instance = self._get_server_instance(instance)
+            server_time = server_instance.CurrentTime()
+            current = server_time - timedelta(seconds=COLLECTION_TIME_INTERVAL)
+            #update the timestamp for next iteration
+            instance_ts.update({START_TIMESTAMP : server_time})
+
+        return current
+
     def make_query_specs(self,instance):
         """
         Build query specs using MORs and metrics metadata.
@@ -1417,6 +1441,7 @@ class VSphereCheck(AgentCheck):
         server_instance = self._get_server_instance(instance)
         error_config = self.error_configs[i_key]
         server_time = server_instance.CurrentTime()
+        start_ts = self.get_collection_time(instance)
         try:
             for resource_type in ALL_RESOURCES_WITH_METRICS:
                 # Safeguard, let's avoid collecting multiple resource types in the same call
@@ -1468,8 +1493,8 @@ class VSphereCheck(AgentCheck):
                         if resource_type in REALTIME_RESOURCES:
                             # request for all realtime samples in the window based on collection interval
                             query_spec.intervalId = REAL_TIME_INTERVAL
-                            query_spec.startTime = server_time - timedelta(seconds=COLLECTION_TIME_INTERVAL)
-                            query_spec.endTime = server_time
+                            query_spec.startTime = start_ts
+                            query_spec.endTime = start_ts + timedelta(seconds=COLLECTION_TIME_INTERVAL)
                         # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
                         # contain at least one element based on the sampling period of the metrics being fetched
                         elif resource_type == vim.ClusterComputeResource:
