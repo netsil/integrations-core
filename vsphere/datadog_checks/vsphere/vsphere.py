@@ -48,7 +48,7 @@ VM_MONITORING_FLAG = 'DatadogMonitored'
 # The size of the ThreadPool used to process the request queue
 DEFAULT_SIZE_POOL = 50
 # The interval in seconds between two refresh of the entities list
-REFRESH_MORLIST_INTERVAL = 5 * 60
+REFRESH_MORLIST_INTERVAL = 15 * 60
 # The interval in seconds between two refresh of metrics metadata (id<->name)
 REFRESH_METRICS_METADATA_INTERVAL = 30 * 60
 
