@@ -1410,23 +1410,26 @@ class VSphereCheck(AgentCheck):
             yield batch
 
     def get_collection_time(self,instance):
-        current = None
+        i_key = self._instance_key(instance)
+        instance_ts = self.collection_ts.get(i_key)
+        timestamp = instance_ts.get(START_TIMESTAMP,None)
+        if timestamp is None:
+            raise Exception("No collection timestamp defined for vCenter instance")
+        return timestamp
+
+    def set_collection_time(self,instance):
         i_key = self._instance_key(instance)
         instance_ts = self.collection_ts.get(i_key)
         timestamp = instance_ts.get(START_TIMESTAMP,None)
         if timestamp:
-            current = timestamp
-            #update the timestamp for next iteration
             timestamp = timestamp + timedelta(seconds=COLLECTION_TIME_INTERVAL)
-            instance_ts.update({START_TIMESTAMP : timestamp})
         else:
             server_instance = self._get_server_instance(instance)
             server_time = server_instance.CurrentTime()
-            current = server_time - timedelta(seconds=COLLECTION_TIME_INTERVAL)
-            #update the timestamp for next iteration
-            instance_ts.update({START_TIMESTAMP : server_time})
+            timestamp = server_time - timedelta(seconds=COLLECTION_TIME_INTERVAL)
 
-        return current
+        #update the timestamp for current iteration
+        instance_ts.update({START_TIMESTAMP : timestamp})
 
     def make_query_specs(self,instance):
         """
@@ -1622,6 +1625,8 @@ class VSphereCheck(AgentCheck):
             pass
 
         self.log.info(u"Metric collection configured with `max_query_metrics: %d`",self.max_historical_metrics)
+
+        self.set_collection_time(instance)
 
         # ## <TEST-INSTRUMENTATION>
         self.gauge('datadog.agent.vsphere.queue_size', self.pool._workq.qsize(), tags=['instant:initial'] + custom_tags)
