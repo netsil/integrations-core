@@ -1621,6 +1621,8 @@ class VSphereCheck(AgentCheck):
                                                                 MAX_QUERY_METRICS_OPTION,DEFAULT_MAX_QUERY_METRICS)
             pass
 
+        self.log.info(u"Metric collection configured with `max_query_metrics: %d`",self.max_historical_metrics)
+
         # ## <TEST-INSTRUMENTATION>
         self.gauge('datadog.agent.vsphere.queue_size', self.pool._workq.qsize(), tags=['instant:initial'] + custom_tags)
         # ## </TEST-INSTRUMENTATION>
