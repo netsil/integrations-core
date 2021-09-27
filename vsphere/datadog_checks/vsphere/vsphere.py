@@ -1444,7 +1444,7 @@ class VSphereCheck(AgentCheck):
         server_instance = self._get_server_instance(instance)
         error_config = self.error_configs[i_key]
         server_time = server_instance.CurrentTime()
-        start_ts = self.get_collection_time(instance)
+        instance_ts = self.get_collection_time(instance)
         try:
             for resource_type in ALL_RESOURCES_WITH_METRICS:
                 # Safeguard, let's avoid collecting multiple resource types in the same call
@@ -1486,6 +1486,31 @@ class VSphereCheck(AgentCheck):
                             yield vmdisk_query_specs
 
                 max_batch_size = self.get_batch_size(resource_type)
+
+                start_time = None
+                end_time = None
+                interval = 0
+
+                # request for all realtime samples in the window based on collection interval
+                if resource_type in REALTIME_RESOURCES:
+                    start_time = instance_ts
+                    end_time = instance_ts + timedelta(seconds=COLLECTION_TIME_INTERVAL)
+                    interval = REAL_TIME_INTERVAL
+                # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
+                # contain at least one element based on the sampling period of the metrics being fetched
+                elif resource_type == vim.ClusterComputeResource:
+                    #use 2 hours as timewindow for cluster metrics
+                    start_time = server_time - timedelta(seconds=CLUSTER_TIME_INTERVAL)
+                    end_time = server_time
+                elif resource_type == vim.Datastore:
+                    # create offset time based on maximum overlap between historical intervals of 300 & 1800
+                    # for which datastore metrics r available
+                    # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.PerformanceManager.QuerySpec.html
+                    # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
+                    offset_time = DATASTORE_TIME_INTERVAL - 10
+                    start_time = server_time - timedelta(seconds=offset_time)
+                    end_time = server_time
+
                 for batch in self.make_batch(mors, metric_ids, max_batch_size):
                     query_specs = []
                     for mor, metrics in batch.items():
@@ -1493,27 +1518,12 @@ class VSphereCheck(AgentCheck):
                         query_spec.entity = mor
                         query_spec.metricId = metrics
                         query_spec.format = "normal"
-                        if resource_type in REALTIME_RESOURCES:
-                            # request for all realtime samples in the window based on collection interval
-                            query_spec.intervalId = REAL_TIME_INTERVAL
-                            query_spec.startTime = start_ts
-                            query_spec.endTime = start_ts + timedelta(seconds=COLLECTION_TIME_INTERVAL)
-                        # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
-                        # contain at least one element based on the sampling period of the metrics being fetched
-                        elif resource_type == vim.ClusterComputeResource:
-                            #use 2 hours as timewindow for cluster metrics
-                            query_spec.startTime = server_time - timedelta(seconds=CLUSTER_TIME_INTERVAL)
-                            query_spec.endTime = server_time
-                        elif resource_type == vim.Datastore:
-                            # create offset time based on maximum overlap between historical intervals of 300 & 1800
-                            # for which datastore metrics r available
-                            # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.PerformanceManager.QuerySpec.html
-                            # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
-                            offset_time = DATASTORE_TIME_INTERVAL - 10
-                            query_spec.startTime = server_time - timedelta(seconds=offset_time)
-                            query_spec.endTime = server_time
-
+                        query_spec.startTime = start_time
+                        query_spec.endTime = end_time
+                        if interval > 0:
+                            query_spec.intervalId = interval
                         query_specs.append(query_spec)
+
                     if query_specs:
                         yield query_specs
 
