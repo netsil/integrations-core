@@ -1636,7 +1636,14 @@ class VSphereCheck(AgentCheck):
 
         self.log.info(u"Metric collection configured with `max_query_metrics: %d`",self.max_historical_metrics)
 
-        self.set_collection_time(instance)
+        try:
+            self.set_collection_time(instance)
+
+        except Exception as e:
+            err_msg = u"Unable to set timestamp for metric collection : %s" % (e)
+            self.log.error(err_msg)
+            self.raiseAlert(instance, 'CollectionError', err_msg)
+            raise Exception(e)
 
         # ## <TEST-INSTRUMENTATION>
         self.gauge('datadog.agent.vsphere.queue_size', self.pool._workq.qsize(), tags=['instant:initial'] + custom_tags)
