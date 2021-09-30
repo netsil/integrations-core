@@ -461,8 +461,7 @@ class SQLServer(AgentCheck):
                     alert_message = alert_message + instance.get('username')
                 self.raise_alert(instance, alert_title, alert_message)
             else:
-                self.log.info("Either alert title or alert message is None. So not sending any alert for following exception")
-                self.log.info(exception_details[-1])
+                self.log.info("Either alert title or alert message is None. So not sending any alert for the exception::{}".format(exception_details[-1]))
 
     def parse_tags(self, tags, key):
         for tag in tags:
