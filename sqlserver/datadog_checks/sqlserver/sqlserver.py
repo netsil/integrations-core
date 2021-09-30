@@ -461,7 +461,7 @@ class SQLServer(AgentCheck):
                     alert_message = alert_message + instance.get('username')
                 self.raise_alert(instance, alert_title, alert_message)
             else:
-                self.log.info("Missing Alert tile or Alert message. Alert not sent for the exception::{}".format(exception_details[-1]))
+                self.log.error("Missing Alert tile or Alert message. Alert not sent for the exception::{}".format(exception_details[-1]))
 
     def parse_tags(self, tags, key):
         for tag in tags:
