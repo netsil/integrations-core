@@ -80,7 +80,7 @@ LAST = 'last'
 INTERVAL = 'interval'
 ERR_CODE = 'code'
 ERR_MSG = 'msg'
-START_TIMESTAMP = 'startTime'
+CURRENT_TIMESTAMP = 'currentTime'
 
 #statsd config default values
 STATSD_SERVER_HOST = '127.0.0.1'
@@ -1412,24 +1412,18 @@ class VSphereCheck(AgentCheck):
     def get_collection_time(self,instance):
         i_key = self._instance_key(instance)
         instance_ts = self.collection_ts.get(i_key)
-        timestamp = instance_ts.get(START_TIMESTAMP,None)
+        timestamp = instance_ts.get(CURRENT_TIMESTAMP,None)
         if timestamp is None:
             raise Exception("No collection timestamp defined for vCenter instance")
         return timestamp
 
     def set_collection_time(self,instance):
+        server_instance = self._get_server_instance(instance)
+        current_ts = server_instance.CurrentTime()
         i_key = self._instance_key(instance)
         instance_ts = self.collection_ts.get(i_key)
-        timestamp = instance_ts.get(START_TIMESTAMP,None)
-        if timestamp:
-            timestamp = timestamp + timedelta(seconds=COLLECTION_TIME_INTERVAL)
-        else:
-            server_instance = self._get_server_instance(instance)
-            server_time = server_instance.CurrentTime()
-            timestamp = server_time - timedelta(seconds=COLLECTION_TIME_INTERVAL)
-
         #update the timestamp for current iteration
-        instance_ts.update({START_TIMESTAMP : timestamp})
+        instance_ts.update({CURRENT_TIMESTAMP : current_ts})
 
     def make_query_specs(self,instance):
         """
@@ -1441,9 +1435,8 @@ class VSphereCheck(AgentCheck):
         if i_key not in self.morlist:
             self.log.info(u"Not collecting metrics for this instance, nothing to do yet: {0}".format(i_key))
             return
-        server_instance = self._get_server_instance(instance)
+
         error_config = self.error_configs[i_key]
-        server_time = server_instance.CurrentTime()
         instance_ts = self.get_collection_time(instance)
         try:
             for resource_type in ALL_RESOURCES_WITH_METRICS:
@@ -1479,8 +1472,8 @@ class VSphereCheck(AgentCheck):
                             vmdisk_query_spec.entity = mor
                             vmdisk_query_spec.metricId = metrics
                             vmdisk_query_spec.format = "normal"
-                            vmdisk_query_spec.startTime = server_time - timedelta(seconds=DATASTORE_TIME_INTERVAL)
-                            vmdisk_query_spec.endTime = server_time
+                            vmdisk_query_spec.startTime = instance_ts - timedelta(seconds=DATASTORE_TIME_INTERVAL)
+                            vmdisk_query_spec.endTime = instance_ts
                             vmdisk_query_specs.append(vmdisk_query_spec)
                         if vmdisk_query_specs:
                             yield vmdisk_query_specs
@@ -1493,23 +1486,23 @@ class VSphereCheck(AgentCheck):
 
                 # request for all realtime samples in the window based on collection interval
                 if resource_type in REALTIME_RESOURCES:
-                    start_time = instance_ts
-                    end_time = instance_ts + timedelta(seconds=COLLECTION_TIME_INTERVAL)
+                    start_time = instance_ts - timedelta(seconds=COLLECTION_TIME_INTERVAL)
+                    end_time = instance_ts
                     interval = REAL_TIME_INTERVAL
                 # We cannot use `maxSample` for historical metrics, let's specify a timewindow that will
                 # contain at least one element based on the sampling period of the metrics being fetched
                 elif resource_type == vim.ClusterComputeResource:
                     #use 2 hours as timewindow for cluster metrics
-                    start_time = server_time - timedelta(seconds=CLUSTER_TIME_INTERVAL)
-                    end_time = server_time
+                    start_time = instance_ts - timedelta(seconds=CLUSTER_TIME_INTERVAL)
+                    end_time = instance_ts
                 elif resource_type == vim.Datastore:
                     # create offset time based on maximum overlap between historical intervals of 300 & 1800
                     # for which datastore metrics r available
                     # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.PerformanceManager.QuerySpec.html
                     # https://www.vmware.com/support/developer/converter-sdk/conv61_apireference/vim.HistoricalInterval.html
                     offset_time = DATASTORE_TIME_INTERVAL - 10
-                    start_time = server_time - timedelta(seconds=offset_time)
-                    end_time = server_time
+                    start_time = instance_ts - timedelta(seconds=offset_time)
+                    end_time = instance_ts
 
                 for batch in self.make_batch(mors, metric_ids, max_batch_size):
                     query_specs = []
@@ -1577,6 +1570,7 @@ class VSphereCheck(AgentCheck):
 
         self.task_list = []
         try:
+            self.set_collection_time(instance)
             for query_specs in self.make_query_specs(instance):
                 if query_specs:
                     self.task_list.append(self.pool.apply_async(self._collect_metrics_atomic, args=(instance, query_specs)))
@@ -1585,7 +1579,7 @@ class VSphereCheck(AgentCheck):
             err_msg = u"Unable to schedule metric collection tasks: %s" % (e)
             error_config.update({ERR_CODE : 'CollectionError'})
             error_config.update({ERR_MSG : err_msg})
-            self.log.warning(err_msg)
+            self.log.error(err_msg)
 
         self.gauge('vsphere.vm.count', vm_count, tags=["vcenter_server:%s" % instance.get('name')] + custom_tags)
 
@@ -1635,15 +1629,6 @@ class VSphereCheck(AgentCheck):
             pass
 
         self.log.info(u"Metric collection configured with `max_query_metrics: %d`",self.max_historical_metrics)
-
-        try:
-            self.set_collection_time(instance)
-
-        except Exception as e:
-            err_msg = u"Unable to set timestamp for metric collection : %s" % (e)
-            self.log.error(err_msg)
-            self.raiseAlert(instance, 'CollectionError', err_msg)
-            raise Exception(e)
 
         # ## <TEST-INSTRUMENTATION>
         self.gauge('datadog.agent.vsphere.queue_size', self.pool._workq.qsize(), tags=['instant:initial'] + custom_tags)
