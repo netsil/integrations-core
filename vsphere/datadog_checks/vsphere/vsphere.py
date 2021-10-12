@@ -46,7 +46,7 @@ CLUSTER_TIME_INTERVAL = 7200
 # Metrics are only collected on vSphere VMs marked by custom field value
 VM_MONITORING_FLAG = 'DatadogMonitored'
 # The size of the ThreadPool used to process the request queue
-DEFAULT_SIZE_POOL = 50
+DEFAULT_SIZE_POOL = 10
 # The interval in seconds between two refresh of the entities list
 REFRESH_MORLIST_INTERVAL = 15 * 60
 # The interval in seconds between two refresh of metrics metadata (id<->name)
