@@ -56,7 +56,7 @@ REFRESH_METRICS_METADATA_INTERVAL = 30 * 60
 # is significantly lower than the size of the queryPerf response, so allow specifying a different value.
 BATCH_COLLECTOR_SIZE = 500
 
-DEFAULT_METRICS_PER_QUERY = 4000
+DEFAULT_METRICS_PER_QUERY = 5000
 DEFAULT_MAX_QUERY_METRICS = 64
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
@@ -1664,7 +1664,7 @@ class VSphereCheck(AgentCheck):
 
             if pending_task_list:
                 self.log.info("Waiting for unfinished jobs to complete")
-                for pending_job in pending_task_list:
+                for pending_job in list(pending_task_list):
                     if not pending_job.wait(MAX_JOB_TIMEOUT):
                         err_msg = u"Collection operation timed out while querying perf metrics"
                         error_code = 'CollectionError'
