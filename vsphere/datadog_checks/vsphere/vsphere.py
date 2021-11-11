@@ -316,32 +316,33 @@ class VSphereCheck(AgentCheck):
 
     def _get_server_instance(self, instance):
         i_key = self._instance_key(instance)
-        error_config = self.error_configs.get(i_key)
-
-        service_check_tags = [
-            'vcenter_server:{0}'.format(instance.get('name')),
-            'vcenter_host:{0}'.format(instance.get('host')),
-        ]
-
-        # Check for ssl configs and generate an appropriate ssl context object
-        ssl_verify = instance.get('ssl_verify', True)
-        ssl_capath = instance.get('ssl_capath', None)
-        if not ssl_verify:
-            context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
-            context.verify_mode = ssl.CERT_NONE
-        elif ssl_capath:
-            context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
-            context.verify_mode = ssl.CERT_REQUIRED
-            context.load_verify_locations(capath=ssl_capath)
-
-        # If both configs are used, log a message explaining the default
-        if not ssl_verify and ssl_capath:
-            self.log.debug("Your configuration is incorrectly attempting to "
-                           "specify both a CA path, and to disable SSL "
-                           "verification. You cannot do both. Proceeding with "
-                           "disabling ssl verification.")
 
         if i_key not in self.server_instances:
+            error_config = self.error_configs.get(i_key)
+
+            service_check_tags = [
+                'vcenter_server:{0}'.format(instance.get('name')),
+                'vcenter_host:{0}'.format(instance.get('host')),
+            ]
+
+            # Check for ssl configs and generate an appropriate ssl context object
+            ssl_verify = instance.get('ssl_verify', True)
+            ssl_capath = instance.get('ssl_capath', None)
+            if not ssl_verify:
+                context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+                context.verify_mode = ssl.CERT_NONE
+            elif ssl_capath:
+                context = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+                context.verify_mode = ssl.CERT_REQUIRED
+                context.load_verify_locations(capath=ssl_capath)
+
+            # If both configs are used, log a message explaining the default
+            if not ssl_verify and ssl_capath:
+                self.log.debug("Your configuration is incorrectly attempting to "
+                            "specify both a CA path, and to disable SSL "
+                            "verification. You cannot do both. Proceeding with "
+                            "disabling ssl verification.")
+
             try:
                 # Object returned by SmartConnect is a ServerInstance
                 #   https://www.vmware.com/support/developer/vc-sdk/visdk2xpubs/ReferenceGuide/vim.ServiceInstance.html
