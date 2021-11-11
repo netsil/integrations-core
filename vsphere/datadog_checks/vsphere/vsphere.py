@@ -418,6 +418,10 @@ class VSphereCheck(AgentCheck):
 
         return self.server_instances[i_key]
 
+    def _refresh_server_instance(self,instance):
+        self._remove_server_instance(instance)
+        self._get_server_instance(instance)
+
     def get_external_host_tags(self):
         """
         Returns a list of tags for every host that is detected by the vSphere
@@ -1561,6 +1565,7 @@ class VSphereCheck(AgentCheck):
         self.task_list = []
         try:
             self.set_collection_time(instance)
+            self._refresh_server_instance(instance)
             for query_specs in self.make_query_specs(instance):
                 if query_specs:
                     self.task_list.append(self.pool.apply_async(self._collect_metrics_atomic, args=(instance, query_specs)))
