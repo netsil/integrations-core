@@ -58,6 +58,11 @@ BATCH_COLLECTOR_SIZE = 500
 
 DEFAULT_METRICS_PER_QUERY = 5000
 DEFAULT_MAX_QUERY_METRICS = 64
+
+# Maximum number of metrics to query for vm disk.The size of the response returned by the query is larger than datastore
+# metrics query so use a lesser value to avoid ssl timeout
+MAX_VMDISK_METRICS_PER_QUERY = 32
+
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
@@ -1466,7 +1471,7 @@ class VSphereCheck(AgentCheck):
                 #create batch of queries for vm disk metrics
                 if resource_type == vim.VirtualMachine and vm_disk_metric_ids:
                     #use max batch size of historical resources since these vm metrics use historical sampling interval
-                    max_batch_size = self.get_batch_size(vim.Datastore)
+                    max_batch_size = MAX_VMDISK_METRICS_PER_QUERY
                     for batch in self.make_batch(mors, vm_disk_metric_ids, max_batch_size):
                         vmdisk_query_specs = []
                         for mor, metrics in batch.items():
