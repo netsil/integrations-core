@@ -736,6 +736,10 @@ class SQLServer(AgentCheck):
         conn_key = self._conn_key(instance, db_key, db_name)
         if conn_key not in self.connections:
             return
+        
+        if self.connections[conn_key]['reuse_count'] > 0:
+            self.connections[conn_key]['reuse_count'] = self.connections[conn_key]['reuse_count'] - 1
+            return
 
         try:
             self.connections[conn_key]['conn'].close()
@@ -788,7 +792,7 @@ class SQLServer(AgentCheck):
             self.service_check(self.SERVICE_CHECK_NAME, AgentCheck.OK,
                                tags=service_check_tags)
             if conn_key not in self.connections:
-                self.connections[conn_key] = {'conn': rawconn, 'timeout': timeout}
+                self.connections[conn_key] = {'conn': rawconn, 'timeout': timeout, 'reuse_count': 10}
             else:
                 try:
                     # explicitly trying to avoid leaks...
