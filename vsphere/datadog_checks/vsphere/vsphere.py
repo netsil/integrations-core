@@ -182,6 +182,8 @@ class VSphereCheck(AgentCheck):
         self.morlist_raw = {}
         # Second layer, processed from the first one
         self.morlist = {}
+        # managed entity count
+        self.morcount = {}
         # Metrics metadata, basically perfCounterId -> {name, group, description}
         self.metrics_metadata = {}
         self.metric_ids = {}
@@ -1150,6 +1152,17 @@ class VSphereCheck(AgentCheck):
                         if mor_obj in self.cache_uuids[i_key][resource_type]:
                             del self.cache_uuids[i_key][resource_type][mor_obj]
                     self.log.debug(u"deleted mor %s",mor_name)
+    
+    def _update_morcount(self, instance):
+        i_key = self._instance_key(instance)
+        if i_key not in self.morcount:
+            self.morcount[i_key] = {}
+        for resource_type in ALL_RESOURCES_WITH_METRICS:
+            self.morcount[i_key][resource_type] = len(self.morlist[i_key][resource_type])
+
+    def _get_morcount(self, instance, entity_type):
+        i_key = self._instance_key(instance)
+        return self.morcount[i_key][entity_type]
 
     def format_metric_name(self,counter):
         return "{}.{}.{}".format(counter.groupInfo.key,counter.nameInfo.key,str(counter.rollupType))
