@@ -63,6 +63,8 @@ DEFAULT_MAX_QUERY_METRICS = 64
 # metrics query so use a lesser value to avoid ssl timeout
 MAX_VMDISK_METRICS_PER_QUERY = 32
 
+#Maximum no of vm mors to be monitored per instance of endpoint
+MAX_VM_MOR_THRESHOLD = 3500
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
@@ -1499,9 +1501,20 @@ class VSphereCheck(AgentCheck):
                             yield vmdisk_query_specs
 
                 max_batch_size = self.get_batch_size(resource_type)
+                #set of unique stringified vm mors for which query specs are being created/sent
+                vm_mors = set()
                 for batch in self.make_batch(mors, metric_ids, max_batch_size):
+                    if resource_type == vim.VirtualMachine:
+                        for mor in batch.keys():
+                            mor_name = str(mor)
+                            vm_mors.add(mor_name)
+                        # drop the entire batch if it goes beyond threshold
+                        # creating subsequent batches will also be skipped
+                        if len(vm_mors) > MAX_VM_MOR_THRESHOLD:
+                            break
                     query_specs = []
                     for mor, metrics in batch.items():
+                        vm_mors.add(str(mor))
                         query_spec = vim.PerformanceManager.QuerySpec()
                         query_spec.entity = mor
                         query_spec.metricId = metrics
