@@ -1565,8 +1565,7 @@ class VSphereCheck(AgentCheck):
         n_mors = 0
         vm_count = 0
         for resource_type in ALL_RESOURCES_WITH_METRICS:
-            mors = self.morlist[i_key].get(resource_type,{})
-            mor_count = len(mors)
+            mor_count = self._get_morcount(instance,resource_type)
             if resource_type == vim.HostSystem:
                 self.log.debug(u"Host count %d",mor_count)
             if resource_type == vim.ClusterComputeResource:
