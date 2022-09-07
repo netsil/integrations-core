@@ -1655,6 +1655,7 @@ class VSphereCheck(AgentCheck):
             self._cache_morlist_raw(instance)
             self._cache_morlist_process(instance)
             self._vacuum_morlist(instance)
+            self._update_morcount(instance)
 
         # Second part: do the job
         self.collect_metrics(instance)
