@@ -259,7 +259,7 @@ class VSphereCheck(AgentCheck):
             tags.append('endpoint_uuid:%s' % instance.get('name'))
             tags.append('message:%s' % error_msg)
             tags.append('timestampISO8601:%s' % datetime.now().isoformat())
-            self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s",title,text,alert_type,tags)
+            self.log.warning(u"Alert info. title:%s , text:%s , type:%s , tags:%s",title,text,alert_type,tags)
             statsd.event(title = title, text = text, alert_type = alert_type, tags = tags)
 
         if reset is True:
