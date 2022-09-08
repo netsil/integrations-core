@@ -245,6 +245,8 @@ class VSphereCheck(AgentCheck):
             title = 'NTNX_NC_VC_no_data_alert'
         elif error_code == 'ConfigError':
             title = 'NTNX_NC_VC_failed_to_read_file'
+        elif error_code == 'ThresholdError':
+            title = 'NTNX_NC_VC_data_drop_alert'
         else:
             title = None
 
