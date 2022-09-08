@@ -1523,7 +1523,6 @@ class VSphereCheck(AgentCheck):
                             break
                     query_specs = []
                     for mor, metrics in batch.items():
-                        vm_mors.add(str(mor))
                         query_spec = vim.PerformanceManager.QuerySpec()
                         query_spec.entity = mor
                         query_spec.metricId = metrics
