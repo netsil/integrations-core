@@ -1167,6 +1167,16 @@ class VSphereCheck(AgentCheck):
         for resource_type in ALL_RESOURCES_WITH_METRICS:
             self.morcount[i_key][resource_type] = len(self.morlist[i_key][resource_type])
 
+    def _check_morcount(self, instance):
+        i_key = self._instance_key(instance)
+        i_host = self._instance_host(instance)
+        vm_count = self.morcount[i_key][vim.VirtualMachine]
+        if vm_count > self.max_vm_threshold:
+            error_msg = u"Threshold of %d vms breached for instance : %s , %s " % (self.max_vm_threshold, i_key, i_host)
+            error_code = 'ThresholdError'
+            self.log.warning(error_msg)
+            self.raiseAlert(error_code,error_msg)
+
     def _get_morcount(self, instance, entity_type):
         i_key = self._instance_key(instance)
         return self.morcount[i_key][entity_type]
@@ -1519,7 +1529,7 @@ class VSphereCheck(AgentCheck):
                             error_msg = u"Threshold of %d breached while collecting vm metrics" % (self.max_vm_threshold)
                             error_code = 'ThresholdError'
                             self.log.warning(error_msg)
-                            self.raiseAlert(error_code,err_msg)
+                            self.raiseAlert(error_code,error_msg)
                             break
                     query_specs = []
                     for mor, metrics in batch.items():
@@ -1676,6 +1686,7 @@ class VSphereCheck(AgentCheck):
             self._cache_morlist_process(instance)
             self._vacuum_morlist(instance)
             self._update_morcount(instance)
+            self._check_morcount(instance)
 
         # Second part: do the job
         self.collect_metrics(instance)
