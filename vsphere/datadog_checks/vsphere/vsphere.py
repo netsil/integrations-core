@@ -64,7 +64,7 @@ DEFAULT_MAX_QUERY_METRICS = 64
 MAX_VMDISK_METRICS_PER_QUERY = 32
 
 #Maximum no of vm mors to be monitored per instance of endpoint
-MAX_VM_MOR_THRESHOLD = 3500
+DEFAULT_MAX_VM_MOR_THRESHOLD = 3500
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
@@ -135,6 +135,9 @@ class VSphereCheck(AgentCheck):
         # Metrics Query size
         self.max_historical_metrics = init_config.get("max_historical_metrics", DEFAULT_MAX_QUERY_METRICS)
         self.metrics_per_query = init_config.get("metrics_per_query", DEFAULT_METRICS_PER_QUERY)
+
+        # VM threshold 
+        self.max_vm_threshold = init_config.get("max_vm_threshold", DEFAULT_MAX_VM_MOR_THRESHOLD)
 
         # Vcenter configuration cluster name list
         self.cluster_list = {}
@@ -1510,7 +1513,7 @@ class VSphereCheck(AgentCheck):
                             vm_mors.add(mor_name)
                         # drop the entire batch if it goes beyond threshold
                         # creating subsequent batches will also be skipped
-                        if len(vm_mors) > MAX_VM_MOR_THRESHOLD:
+                        if len(vm_mors) > self.max_vm_threshold:
                             break
                     query_specs = []
                     for mor, metrics in batch.items():
