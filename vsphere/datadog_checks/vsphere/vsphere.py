@@ -1516,6 +1516,10 @@ class VSphereCheck(AgentCheck):
                         # drop the entire batch if it goes beyond threshold
                         # creating subsequent batches will also be skipped
                         if len(vm_mors) > self.max_vm_threshold:
+                            error_msg = u"Threshold of %d breached while collecting vm metrics" % (self.max_vm_threshold)
+                            error_code = 'ThresholdError'
+                            self.log.warning(error_msg)
+                            self.raiseAlert(error_code,err_msg)
                             break
                     query_specs = []
                     for mor, metrics in batch.items():
