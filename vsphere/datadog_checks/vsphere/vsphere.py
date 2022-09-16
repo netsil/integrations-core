@@ -63,6 +63,8 @@ DEFAULT_MAX_QUERY_METRICS = 64
 # metrics query so use a lesser value to avoid ssl timeout
 MAX_VMDISK_METRICS_PER_QUERY = 32
 
+#Maximum no of vm mors to be monitored per instance of endpoint
+DEFAULT_MAX_VM_MOR_THRESHOLD = 3500
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
@@ -134,6 +136,9 @@ class VSphereCheck(AgentCheck):
         self.max_historical_metrics = init_config.get("max_historical_metrics", DEFAULT_MAX_QUERY_METRICS)
         self.metrics_per_query = init_config.get("metrics_per_query", DEFAULT_METRICS_PER_QUERY)
 
+        # VM threshold 
+        self.max_vm_threshold = init_config.get("max_vm_threshold", DEFAULT_MAX_VM_MOR_THRESHOLD)
+
         # Vcenter configuration cluster name list
         self.cluster_list = {}
         # cluster mors based on cluster name list to be monitored
@@ -182,6 +187,8 @@ class VSphereCheck(AgentCheck):
         self.morlist_raw = {}
         # Second layer, processed from the first one
         self.morlist = {}
+        # managed entity count
+        self.morcount = {}
         # Metrics metadata, basically perfCounterId -> {name, group, description}
         self.metrics_metadata = {}
         self.metric_ids = {}
@@ -238,6 +245,8 @@ class VSphereCheck(AgentCheck):
             title = 'NTNX_NC_VC_no_data_alert'
         elif error_code == 'ConfigError':
             title = 'NTNX_NC_VC_failed_to_read_file'
+        elif error_code == 'ThresholdError':
+            title = 'NTNX_NC_VC_data_drop_alert'
         else:
             title = None
 
@@ -250,7 +259,7 @@ class VSphereCheck(AgentCheck):
             tags.append('endpoint_uuid:%s' % instance.get('name'))
             tags.append('message:%s' % error_msg)
             tags.append('timestampISO8601:%s' % datetime.now().isoformat())
-            self.log.debug(u"Alert info. title:%s , text:%s , type:%s , tags:%s",title,text,alert_type,tags)
+            self.log.warning(u"Alert info. title:%s , text:%s , type:%s , tags:%s",title,text,alert_type,tags)
             statsd.event(title = title, text = text, alert_type = alert_type, tags = tags)
 
         if reset is True:
@@ -1150,6 +1159,27 @@ class VSphereCheck(AgentCheck):
                         if mor_obj in self.cache_uuids[i_key][resource_type]:
                             del self.cache_uuids[i_key][resource_type][mor_obj]
                     self.log.debug(u"deleted mor %s",mor_name)
+    
+    def _update_morcount(self, instance):
+        i_key = self._instance_key(instance)
+        if i_key not in self.morcount:
+            self.morcount[i_key] = {}
+        for resource_type in ALL_RESOURCES_WITH_METRICS:
+            self.morcount[i_key][resource_type] = len(self.morlist[i_key][resource_type])
+
+    def _check_morcount(self, instance):
+        i_key = self._instance_key(instance)
+        i_host = self._instance_host(instance)
+        vm_count = self.morcount[i_key][vim.VirtualMachine]
+        if vm_count > self.max_vm_threshold:
+            error_msg = u"Threshold of %d vms breached for instance : %s , %s " % (self.max_vm_threshold, i_key, i_host)
+            error_code = 'ThresholdError'
+            self.log.warning(error_msg)
+            self.raiseAlert(error_code,error_msg)
+
+    def _get_morcount(self, instance, entity_type):
+        i_key = self._instance_key(instance)
+        return self.morcount[i_key][entity_type]
 
     def format_metric_name(self,counter):
         return "{}.{}.{}".format(counter.groupInfo.key,counter.nameInfo.key,str(counter.rollupType))
@@ -1486,7 +1516,21 @@ class VSphereCheck(AgentCheck):
                             yield vmdisk_query_specs
 
                 max_batch_size = self.get_batch_size(resource_type)
+                #set of unique stringified vm mors for which query specs are being created/sent
+                vm_mors = set()
                 for batch in self.make_batch(mors, metric_ids, max_batch_size):
+                    if resource_type == vim.VirtualMachine:
+                        for mor in batch.keys():
+                            mor_name = str(mor)
+                            vm_mors.add(mor_name)
+                        # drop the entire batch if it goes beyond threshold
+                        # creating subsequent batches will also be skipped
+                        if len(vm_mors) > self.max_vm_threshold:
+                            error_msg = u"Threshold of %d breached while collecting vm metrics" % (self.max_vm_threshold)
+                            error_code = 'ThresholdError'
+                            self.log.warning(error_msg)
+                            self.raiseAlert(error_code,error_msg)
+                            break
                     query_specs = []
                     for mor, metrics in batch.items():
                         query_spec = vim.PerformanceManager.QuerySpec()
@@ -1552,16 +1596,15 @@ class VSphereCheck(AgentCheck):
         n_mors = 0
         vm_count = 0
         for resource_type in ALL_RESOURCES_WITH_METRICS:
-            mors = self.morlist[i_key].get(resource_type,{})
-            mor_count = len(mors)
+            mor_count = self._get_morcount(instance,resource_type)
             if resource_type == vim.HostSystem:
-                self.log.debug(u"Host count %d",mor_count)
+                self.log.info(u"Host count %d",mor_count)
             if resource_type == vim.ClusterComputeResource:
-                self.log.debug(u"Cluster count %d",mor_count)
+                self.log.info(u"Cluster count %d",mor_count)
             if resource_type == vim.Datastore:
-                self.log.debug(u"Datastore count %d",mor_count)
+                self.log.info(u"Datastore count %d",mor_count)
             if resource_type == vim.VirtualMachine:
-                self.log.debug(u"Vm count %d",mor_count)
+                self.log.info(u"Vm count %d",mor_count)
                 vm_count = mor_count
 
             n_mors += mor_count
@@ -1642,6 +1685,8 @@ class VSphereCheck(AgentCheck):
             self._cache_morlist_raw(instance)
             self._cache_morlist_process(instance)
             self._vacuum_morlist(instance)
+            self._update_morcount(instance)
+            self._check_morcount(instance)
 
         # Second part: do the job
         self.collect_metrics(instance)
