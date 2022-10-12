@@ -116,8 +116,10 @@ NTNX__microsoft_sqlserver_data_collection_latency = "NTNX__microsoft_sqlserver_d
 # Constant for Query Execution time threshold
 DATA_COLLECTION_TIME_LIMIT = 10
 
+SLOW_COLLECTION_TIME_LIMIT = 60
+
 #Constant for retry interval for bad connections
-CONNECTION_RETRY_INTERVAL = 30 * 60
+CONNECTION_RETRY_INTERVAL = 60 * 60
 
 class SQLConnectionError(Exception):
     """
@@ -596,8 +598,16 @@ class SQLServer(AgentCheck):
 
             endTime = time.time()
             self.log.debug("Check for raising alert if it exceeds collection time")
-            if int(endTime - initialTime) >= DATA_COLLECTION_TIME_LIMIT:
-                self.log.info("Raising alert due to data collection time exceeded %s secs" % DATA_COLLECTION_TIME_LIMIT)
+            collection_time = int(endTime - initialTime)
+            if collection_time >= DATA_COLLECTION_TIME_LIMIT:
+                endpoint_uuid = self.parse_tags(instance.get('tags', []), ENDPOINT_UUID_STR)
+                # in case its a very slow sqlserver , stop monitoring it
+                if collection_time >= SLOW_COLLECTION_TIME_LIMIT:
+                    instance_key = self._conn_key(instance, self.DEFAULT_DB_KEY)
+                    self.failed_instances[instance_key] = time.time()
+                    self.do_check[instance_key] = False
+                    self.log.info("Stopping monitoring for %s as it took %s secs for metrics collection " % (endpoint_uuid, collection_time))
+                self.log.info("Raising alert for endpoint %s due to data collection time exceeded %s secs" % (endpoint_uuid, DATA_COLLECTION_TIME_LIMIT))
                 alert_title = NTNX__microsoft_sqlserver_data_collection_latency
                 alert_message = "Latency in data collection. Taking more than {} secs to collect.".format(DATA_COLLECTION_TIME_LIMIT)
                 try:
@@ -885,7 +895,7 @@ class SqlComplexMetric(SqlServerMetric):
                             value, timestamp = cached_metrics_data.get(context)
                             value = 0 if value > report_value else value
                         else:
-                            self.log.info("missing context {0}".format(context))
+                            self.log.debug("missing context {0}".format(context))
                             cached_metrics_data[context] = (report_value, current_timestamp)
                             continue
 
