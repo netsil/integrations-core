@@ -1529,7 +1529,7 @@ class VSphereCheck(AgentCheck):
                             error_msg = u"Threshold of %d breached while collecting vm metrics" % (self.max_vm_threshold)
                             error_code = 'ThresholdError'
                             self.log.warning(error_msg)
-                            self.raiseAlert(error_code,error_msg)
+                            self.raiseAlert(instance,error_code,error_msg)
                             break
                     query_specs = []
                     for mor, metrics in batch.items():
