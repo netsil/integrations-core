@@ -64,7 +64,7 @@ DEFAULT_MAX_QUERY_METRICS = 64
 MAX_VMDISK_METRICS_PER_QUERY = 32
 
 #Maximum no of vm mors to be monitored per instance of endpoint
-DEFAULT_MAX_VM_MOR_THRESHOLD = 3500
+DEFAULT_MAX_VM_MOR_THRESHOLD = 4500
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
@@ -1175,7 +1175,7 @@ class VSphereCheck(AgentCheck):
             error_msg = u"Threshold of %d vms breached for instance : %s , %s " % (self.max_vm_threshold, i_key, i_host)
             error_code = 'ThresholdError'
             self.log.warning(error_msg)
-            self.raiseAlert(error_code,error_msg)
+            self.raiseAlert(instance,error_code,error_msg)
 
     def _get_morcount(self, instance, entity_type):
         i_key = self._instance_key(instance)
