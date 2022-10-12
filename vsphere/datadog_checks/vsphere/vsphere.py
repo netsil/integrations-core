@@ -64,7 +64,7 @@ DEFAULT_MAX_QUERY_METRICS = 64
 MAX_VMDISK_METRICS_PER_QUERY = 32
 
 #Maximum no of vm mors to be monitored per instance of endpoint
-DEFAULT_MAX_VM_MOR_THRESHOLD = 3500
+DEFAULT_MAX_VM_MOR_THRESHOLD = 4500
 # the vcenter maxquerymetrics option
 MAX_QUERY_METRICS_OPTION = "config.vpxd.stats.maxQueryMetrics"
 
