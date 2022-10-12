@@ -1175,7 +1175,7 @@ class VSphereCheck(AgentCheck):
             error_msg = u"Threshold of %d vms breached for instance : %s , %s " % (self.max_vm_threshold, i_key, i_host)
             error_code = 'ThresholdError'
             self.log.warning(error_msg)
-            self.raiseAlert(error_code,error_msg)
+            self.raiseAlert(instance,error_code,error_msg)
 
     def _get_morcount(self, instance, entity_type):
         i_key = self._instance_key(instance)
